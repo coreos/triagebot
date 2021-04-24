@@ -104,6 +104,18 @@ class Bug(object):
     def __str__(self):
         return f'[{self.bz}] {self.summary}'
 
+    @staticmethod
+    def is_posted(db, bz):
+        '''Class method returning True if we've already posted the specified
+        BZ.  This allows the Bugzilla polling loop to check whether to
+        process a BZ without constructing a Bug, since the latter makes an
+        additional Bugzilla query.'''
+        try:
+            db.lookup_bz(bz)
+            return True
+        except KeyError:
+            return False
+
     @property
     def posted(self):
         '''True if this bug has been posted to Slack.'''
@@ -318,9 +330,8 @@ def check_bugzilla(config, bzapi, client, db):
         if bz.id in ignore:
             continue
         with db:
-            bug = Bug(config, client, bzapi, db, bz=bz.id)
-            if not bug.posted:
-                bug.post()
+            if not Bug.is_posted(db, bz.id):
+                Bug(config, client, bzapi, db, bz=bz.id).post()
 
 
 def main():
