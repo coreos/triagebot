@@ -17,9 +17,9 @@ import yaml
 ISSUE_LINK = 'https://github.com/bgilbert/triagebot/issues'
 HELP = f'''
 I understand these commands:
-`help` - print this message
-`track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
 `unresolve` (in BZ thread) - unresolve the BZ
+`track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
+`help` - print this message
 Report problems <{ISSUE_LINK}|here>.
 '''
 
