@@ -19,8 +19,8 @@ bugzilla-product: OpenShift Container Platform
 bugzilla-component: RHCOS
 # Bugzilla polling interval in seconds
 bugzilla-poll-interval: 300
-# Don't report any bugs with IDs smaller than this
-bugzilla-minimum-bug-number: 1953100
+# List of bug numbers to ignore
+bugzilla-ignore-bugs: []
 
 # Database file
 database: ~/.triagebot-db

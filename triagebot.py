@@ -307,11 +307,12 @@ def process_event(config, socket_client, req):
 
 @report_errors
 def check_bugzilla(config, bzapi, client, db):
+    ignore = set(config.get('bugzilla_ignore_bugs', []))
     query = bzapi.build_query(product=config.bugzilla_product,
             component=config.bugzilla_component, status='NEW',
             include_fields=['id'])
     for bz in bzapi.query(query):
-        if bz.id < config.get('bugzilla_minimum_bug_number', 0):
+        if bz.id in ignore:
             continue
         with db:
             bug = Bug(config, client, bzapi, db, bz=bz.id)
