@@ -101,6 +101,9 @@ class Bug(object):
         details = bzapi.getbug(self.bz, include_fields=['summary'])
         self.summary = details.summary
 
+    def __str__(self):
+        return f'[{self.bz}] {self.summary}'
+
     @property
     def posted(self):
         '''True if this bug has been posted to Slack.'''
