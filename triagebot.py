@@ -18,6 +18,7 @@ ISSUE_LINK = 'https://github.com/bgilbert/triagebot/issues'
 HELP = f'''
 I understand these commands:
 `unresolve` (in BZ thread) - unresolve the BZ
+`refresh` (in BZ thread) - refresh the BZ description
 `track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
 `help` - print this message
 Report problems <{ISSUE_LINK}|here>.
@@ -141,7 +142,7 @@ class Bug(object):
         self._client.pins_add(channel=self.channel, timestamp=self.ts)
         self._db.add_bug(self.bz, self.channel, self.ts)
 
-    def _update_message(self):
+    def update_message(self):
         '''Rerender the existing Slack message for this bug.'''
         assert self.posted
         message, blocks = self._make_message()
@@ -153,7 +154,7 @@ class Bug(object):
         resolved.'''
         assert self.posted
         self.resolved = True
-        self._update_message()
+        self.update_message()
         try:
             self._client.pins_remove(channel=self.channel, timestamp=self.ts)
         except SlackApiError as e:
@@ -166,7 +167,7 @@ class Bug(object):
         already unresolved.'''
         assert self.posted
         self.resolved = False
-        self._update_message()
+        self.update_message()
         try:
             self._client.pins_add(channel=self.channel, timestamp=self.ts)
         except SlackApiError as e:
@@ -244,6 +245,18 @@ def process_event(config, socket_client, req):
                     fail_command("Couldn't find a BZ matching this thread.")
                     return
                 bug.unresolve()
+                complete_command()
+            elif message == 'refresh':
+                if 'thread_ts' not in payload.event:
+                    fail_command('`refresh` command must be used in a thread.')
+                    return
+                try:
+                    bug = make_bug(channel=payload.event.channel,
+                            ts=payload.event.thread_ts)
+                except KeyError:
+                    fail_command("Couldn't find a BZ matching this thread.")
+                    return
+                bug.update_message()
                 complete_command()
             elif message.startswith('track '):
                 try:
