@@ -74,7 +74,8 @@ class Database(object):
 class Bug(object):
     # Database transactions must be supplied by the caller.
 
-    def __init__(self, config, client, db, bz=None, channel=None, ts=None):
+    def __init__(self, config, client, bzapi, db, bz=None, channel=None,
+            ts=None):
         self._config = config
         self._client = client
         self._db = db
@@ -93,6 +94,8 @@ class Bug(object):
             assert channel is not None and ts is not None
             # raises KeyError on unknown timestamp
             self.bz, self.resolved = db.lookup_ts(channel, ts)
+        details = bzapi.getbug(self.bz, include_fields=['summary'])
+        self.summary = details.summary
 
     @property
     def posted(self):
@@ -101,8 +104,8 @@ class Bug(object):
 
     def _make_message(self):
         '''Format the Slack message for a bug.'''
-        icon = ':white_check_mark:' if self.resolved else ':ladybug:'
-        message = f'{icon} {self._config.bugzilla_bug_url}{self.bz} :thread:'
+        icon = ':white_check_mark:' if self.resolved else ':bugzilla:'
+        message = f'{icon} <{self._config.bugzilla_bug_url}{self.bz}|[{self.bz}] {self.summary}> :thread:'
         blocks = [
             {
                 'type': 'section',
@@ -133,7 +136,8 @@ class Bug(object):
         assert not self.posted
         message, blocks = self._make_message()
         self.ts = self._client.chat_postMessage(channel=self.channel,
-                text=message, blocks=blocks)['ts']
+                text=message, blocks=blocks, unfurl_links=False,
+                unfurl_media=False)['ts']
         self._client.pins_add(channel=self.channel, timestamp=self.ts)
         self._db.add_bug(self.bz, self.channel, self.ts)
 
@@ -202,6 +206,8 @@ def process_event(config, socket_client, req):
     client = socket_client.web_client
     payload = DottedDict(req.payload)
     db = Database(config)
+    bzapi = bugzilla.Bugzilla(config.bugzilla, api_key=config.bugzilla_key,
+            force_rest=True)
 
     def ack_event():
         '''Acknowledge the event, as required by Slack.'''
@@ -229,7 +235,8 @@ def process_event(config, socket_client, req):
                     fail_command('`unresolve` command must be used in a thread.')
                     return
                 try:
-                    bug = Bug(config, client, db, channel=payload.event.channel,
+                    bug = Bug(config, client, bzapi, db,
+                            channel=payload.event.channel,
                             ts=payload.event.thread_ts)
                 except KeyError:
                     fail_command("Couldn't find a BZ matching this thread.")
@@ -247,7 +254,7 @@ def process_event(config, socket_client, req):
                 except ValueError:
                     fail_command("Invalid bug number.")
                     return
-                bug = Bug(config, client, db, bz=bz)
+                bug = Bug(config, client, bzapi, db, bz=bz)
                 if bug.posted:
                     link = client.chat_getPermalink(channel=bug.channel,
                             message_ts=bug.ts)["permalink"]
@@ -269,7 +276,7 @@ def process_event(config, socket_client, req):
         elif req.type == 'interactive' and payload.type == 'block_actions' and payload.actions[0].value == 'resolve':
             ack_event()
             try:
-                bug = Bug(config, client, db,
+                bug = Bug(config, client, bzapi, db,
                         channel=payload.container.channel_id,
                         ts=payload.container.message_ts)
             except KeyError:
@@ -290,7 +297,7 @@ def check_bugzilla(config, bzapi, client, db):
         if bz.id < config.get('bugzilla_minimum_bug_number', 0):
             continue
         with db:
-            bug = Bug(config, client, db, bz=bz.id)
+            bug = Bug(config, client, bzapi, db, bz=bz.id)
             if not bug.posted:
                 bug.post()
 
