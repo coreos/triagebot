@@ -209,6 +209,9 @@ def process_event(config, socket_client, req):
     bzapi = bugzilla.Bugzilla(config.bugzilla, api_key=config.bugzilla_key,
             force_rest=True)
 
+    def make_bug(**kwargs):
+        return Bug(config, client, bzapi, db, **kwargs)
+
     def ack_event():
         '''Acknowledge the event, as required by Slack.'''
         resp = SocketModeResponse(envelope_id=req.envelope_id)
@@ -235,8 +238,7 @@ def process_event(config, socket_client, req):
                     fail_command('`unresolve` command must be used in a thread.')
                     return
                 try:
-                    bug = Bug(config, client, bzapi, db,
-                            channel=payload.event.channel,
+                    bug = make_bug(channel=payload.event.channel,
                             ts=payload.event.thread_ts)
                 except KeyError:
                     fail_command("Couldn't find a BZ matching this thread.")
@@ -254,7 +256,7 @@ def process_event(config, socket_client, req):
                 except ValueError:
                     fail_command("Invalid bug number.")
                     return
-                bug = Bug(config, client, bzapi, db, bz=bz)
+                bug = make_bug(bz=bz)
                 if bug.posted:
                     link = client.chat_getPermalink(channel=bug.channel,
                             message_ts=bug.ts)["permalink"]
@@ -276,8 +278,7 @@ def process_event(config, socket_client, req):
         elif req.type == 'interactive' and payload.type == 'block_actions' and payload.actions[0].value == 'resolve':
             ack_event()
             try:
-                bug = Bug(config, client, bzapi, db,
-                        channel=payload.container.channel_id,
+                bug = make_bug(channel=payload.container.channel_id,
                         ts=payload.container.message_ts)
             except KeyError:
                 client.chat_postMessage(channel=payload.container.channel_id,
