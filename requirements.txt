@@ -1,0 +1,4 @@
+dotted-dict
+python-bugzilla
+PyYAML
+slack_sdk

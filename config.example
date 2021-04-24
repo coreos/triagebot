@@ -1,0 +1,26 @@
+# Slack app token for socket-mode event handling
+slack-app-token: xapp-1-xxx
+# Slack workspace token
+slack-token: xoxb-xxx
+# Destination channel for new bugs
+channel: Cxxx
+# User ID that will receive error tracebacks via DM
+error-notification: Uxxx
+
+# Hostname of the Bugzilla server
+bugzilla: bugzilla.redhat.com
+# Prefix of user-friendly bug URL
+bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
+# Bugzilla API key
+bugzilla-key: xxx
+# Product to scan for NEW bugs
+bugzilla-product: OpenShift Container Platform
+# Component to scan for NEW bugs
+bugzilla-component: RHCOS
+# Bugzilla polling interval in seconds
+bugzilla-poll-interval: 300
+# Don't report any bugs with IDs smaller than this
+bugzilla-minimum-bug-number: 1953100
+
+# Database file
+database: ~/.triagebot-db
