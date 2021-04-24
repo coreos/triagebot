@@ -26,7 +26,10 @@ Report problems <{ISSUE_LINK}|here>.
 
 class Database(object):
     def __init__(self, config):
-        self._db = sqlite3.connect(config.database)
+        # Use DB locking to protect against races between the Bugzilla
+        # polling thread and the track command, and to avoid SQLITE_BUSY on
+        # lock upgrade.  We're not performance-critical.
+        self._db = sqlite3.connect(config.database, isolation_level='immediate')
         with self:
             ver = self._db.execute('pragma user_version').fetchone()[0]
             if ver < 1:
