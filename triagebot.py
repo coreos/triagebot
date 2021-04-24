@@ -5,6 +5,7 @@ import bugzilla
 from dotted_dict import DottedDict
 from functools import wraps
 import os
+import requests
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode import SocketModeClient
@@ -208,6 +209,10 @@ def report_errors(f):
     def wrapper(config, *args, **kwargs):
         try:
             return f(config, *args, **kwargs)
+        except requests.ConnectionError as e:
+            # Exception type leaked from the bugzilla API.  Assume transient
+            # network problem; don't send message.
+            print(e)
         except Exception as e:
             try:
                 message = f'Caught exception:\n```\n{traceback.format_exc()}```'

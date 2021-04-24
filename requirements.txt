@@ -1,4 +1,5 @@
 dotted-dict
 python-bugzilla
 PyYAML
+requests
 slack_sdk
