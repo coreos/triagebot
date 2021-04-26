@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+#
 # Apache 2.0 license
 
 import argparse
