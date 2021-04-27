@@ -32,4 +32,4 @@ You'll also need to set up a Slack app in your workspace and get an API token fo
 
 ## Config format
 
-See [config.example](config.example).
+See [config.example](config.example).  Put this in `~/.triagebot` by default.
