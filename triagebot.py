@@ -350,10 +350,21 @@ def main():
             default='~/.triagebot-db', help='database file')
     args = parser.parse_args()
 
-    # Read config and connect to services
+    # Read config
     with open(os.path.expanduser(args.config)) as fh:
         config = DottedDict(yaml.safe_load(fh))
         config.database = os.path.expanduser(args.database)
+    env_map = (
+        ('TRIAGEBOT_SLACK_APP_TOKEN', 'slack-app-token'),
+        ('TRIAGEBOT_SLACK_TOKEN', 'slack-token'),
+        ('TRIAGEBOT_BUGZILLA_KEY', 'bugzilla-key')
+    )
+    for env, config_key in env_map:
+        v = os.environ.get(env)
+        if v:
+            setattr(config, config_key, v)
+
+    # Connect to services
     client = WebClient(token=config.slack_token)
     # store our user ID
     config.bot_id = client.auth_test()['user_id']

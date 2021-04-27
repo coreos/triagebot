@@ -1,6 +1,8 @@
 # Slack app token for socket-mode event handling
+# (if not specified in TRIAGEBOT_SLACK_APP_TOKEN env var)
 slack-app-token: xapp-1-xxx
 # Slack workspace token
+# (if not specified in TRIAGEBOT_SLACK_TOKEN env var)
 slack-token: xoxb-xxx
 # Destination channel for new bugs
 channel: Cxxx
@@ -12,6 +14,7 @@ bugzilla: bugzilla.redhat.com
 # Prefix of user-friendly bug URL
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 # Bugzilla API key
+# (if not specified in TRIAGEBOT_BUGZILLA_KEY env var)
 bugzilla-key: xxx
 # Product to scan for NEW bugs
 bugzilla-product: OpenShift Container Platform
