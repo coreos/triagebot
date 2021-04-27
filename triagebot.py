@@ -346,13 +346,14 @@ def main():
             description='Simple Bugzilla triage helper bot for Slack.')
     parser.add_argument('-c', '--config', metavar='FILE',
             default='~/.triagebot', help='config file')
+    parser.add_argument('-d', '--database', metavar='FILE',
+            default='~/.triagebot-db', help='database file')
     args = parser.parse_args()
 
     # Read config and connect to services
     with open(os.path.expanduser(args.config)) as fh:
         config = DottedDict(yaml.safe_load(fh))
-        config.database = os.path.expanduser(
-                config.get('database', '~/.triagebot-db'))
+        config.database = os.path.expanduser(args.database)
     client = WebClient(token=config.slack_token)
     # store our user ID
     config.bot_id = client.auth_test()['user_id']

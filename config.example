@@ -21,6 +21,3 @@ bugzilla-component: RHCOS
 bugzilla-poll-interval: 300
 # List of bug numbers to ignore
 bugzilla-ignore-bugs: []
-
-# Database file
-database: ~/.triagebot-db
