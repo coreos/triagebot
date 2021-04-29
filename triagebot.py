@@ -23,6 +23,7 @@ I understand these commands:
 `unresolve` (in BZ thread) - unresolve the BZ
 `refresh` (in BZ thread) - refresh the BZ description
 `track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
+`ping` - check whether the bot is running
 `help` - print this message
 Report problems <{ISSUE_LINK}|here>.
 '''
@@ -302,6 +303,8 @@ def process_event(config, socket_client, req):
                     return
                 bug.post()
                 bug.log(f'_Requested by <@{payload.event.user}>._')
+                complete_command()
+            elif message == 'ping':
                 complete_command()
             elif message == 'help':
                 client.chat_postMessage(channel=payload.event.channel, text=HELP,
