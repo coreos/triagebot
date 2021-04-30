@@ -8,6 +8,8 @@ slack-token: xoxb-xxx
 channel: Cxxx
 # User ID that will receive error tracebacks via DM
 error-notification: Uxxx
+# How long of an outage to allow before the channel is notified
+watchdog-minutes: 30
 
 # Hostname of the Bugzilla server
 bugzilla: bugzilla.redhat.com

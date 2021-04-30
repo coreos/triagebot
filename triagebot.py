@@ -44,7 +44,14 @@ class Database(object):
                         'resolved integer not null default 0)')
                 self._db.execute('create unique index bugs_messages on bugs '
                         '(channel, timestamp)')
-                self._db.execute('pragma user_version = 1')
+            if ver < 2:
+                self._db.execute('create table specials '
+                        '(name text unique not null, '
+                        'channel text not null, '
+                        'id text not null)')
+                self._db.execute('create unique index specials_messages '
+                        'on specials (channel, id)')
+                self._db.execute('pragma user_version = 2')
 
     def __enter__(self):
         '''Start a database transaction.'''
@@ -77,6 +84,17 @@ class Database(object):
             raise KeyError
         bz, resolved = res
         return bz, bool(resolved)
+
+    def set_special(self, name, channel, id):
+        self._db.execute('insert or replace into specials (name, channel, id) '
+                'values (?, ?, ?)', (name, channel, id))
+
+    def lookup_special(self, name):
+        res = self._db.execute('select channel, id from specials where '
+                'name == ?', (name,)).fetchone()
+        if res is None:
+            raise KeyError
+        return res
 
 
 class Bug(object):
@@ -330,6 +348,38 @@ def process_event(config, socket_client, req):
             bug.log(f'_Resolved by <@{payload.user.id}>.  Undo with_ `<@{config.bot_id}> unresolve`')
 
 
+def update_watchdog(config, client, db):
+    '''Reschedule the message-in-a-bottle that warns of a bot failure.'''
+    # First, add new message
+    expiration = int(time.time() + 60 * config.watchdog_minutes)
+    message = f":robot_face: If you're seeing this, I haven't completed a Bugzilla check in {config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead."
+    new_id = client.chat_scheduleMessage(channel=config.channel,
+            post_at=expiration, text=message)['scheduled_message_id']
+    # Then delete the old one
+    name = 'watchdog'
+    try:
+        old_channel, old_id = db.lookup_special(name)
+    except KeyError:
+        # No previous message
+        pass
+    else:
+        try:
+            client.chat_deleteScheduledMessage(channel=old_channel,
+                    scheduled_message_id=old_id)
+        except SlackApiError as e:
+            if e.response['error'] == 'invalid_scheduled_message_id':
+                # Watchdog timer already fired.  Report that we're back.
+                client.chat_postMessage(channel=config.channel,
+                        text='_is back_')
+            else:
+                # Unexpected error.  We already rescheduled the timer, and
+                # it doesn't seem like we should abort the transaction for
+                # this.  Just log it.
+                print(e)
+    # Update DB
+    db.set_special(name, config.channel, new_id)
+
+
 @report_errors
 def check_bugzilla(config, bzapi, client, db):
     ignore = set(config.get('bugzilla_ignore_bugs', []))
@@ -342,6 +392,8 @@ def check_bugzilla(config, bzapi, client, db):
         with db:
             if not Bug.is_posted(db, bz.id):
                 Bug(config, client, bzapi, db, bz=bz.id).post()
+    with db:
+        update_watchdog(config, client, db)
 
 
 def main():
