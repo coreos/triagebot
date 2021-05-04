@@ -5,7 +5,7 @@
 import argparse
 import bugzilla
 from dotted_dict import DottedDict
-from functools import wraps
+from functools import reduce, wraps
 import os
 import requests
 from slack_sdk import WebClient
@@ -27,6 +27,17 @@ I understand these commands:
 `help` - print this message
 Report problems <{ISSUE_LINK}|here>.
 '''
+
+def escape(message):
+    '''Escape a string for inclusion in a Slack message.'''
+    # https://api.slack.com/reference/surfaces/formatting#escaping
+    map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+    }
+    return reduce(lambda s, p: s.replace(p[0], p[1]), map.items(), message)
+
 
 class Database(object):
     def __init__(self, config):
@@ -146,7 +157,7 @@ class Bug(object):
     def _make_message(self):
         '''Format the Slack message for a bug.'''
         icon = ':white_check_mark:' if self.resolved else ':bugzilla:'
-        message = f'{icon} <{self._config.bugzilla_bug_url}{self.bz}|[{self.bz}] {self.summary}> :thread:'
+        message = f'{icon} <{self._config.bugzilla_bug_url}{self.bz}|[{self.bz}] {escape(self.summary)}> :thread:'
         blocks = [
             {
                 'type': 'section',
