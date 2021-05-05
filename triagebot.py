@@ -15,6 +15,7 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 import sqlite3
 import time
 import traceback
+from urllib.error import URLError
 import yaml
 
 ISSUE_LINK = 'https://github.com/bgilbert/triagebot/issues'
@@ -243,6 +244,10 @@ def report_errors(f):
             return f(config, *args, **kwargs)
         except (requests.ConnectionError, requests.HTTPError) as e:
             # Exception type leaked from the bugzilla API.  Assume transient
+            # network problem; don't send message.
+            print(e)
+        except URLError as e:
+            # Exception type leaked from the slack_sdk API.  Assume transient
             # network problem; don't send message.
             print(e)
         except Exception as e:
