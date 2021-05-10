@@ -296,6 +296,11 @@ def process_event(config, socket_client, req):
 
     with db:
         if req.type == 'events_api' and payload.event.type == 'app_mention':
+            if payload.event.channel != config.channel:
+                # Don't even acknowledge events outside our channel, to
+                # avoid interfering with separate instances in other
+                # channels.
+                return
             ack_event()
             message = payload.event.text.replace(f'<@{config.bot_id}>', '').strip()
             if message == 'unresolve':
@@ -355,6 +360,11 @@ def process_event(config, socket_client, req):
             else:
                 fail_command(f"I didn't understand that.  Try `<@{config.bot_id}> help`")
         elif req.type == 'interactive' and payload.type == 'block_actions' and payload.actions[0].value == 'resolve':
+            if payload.container.channel_id != config.channel:
+                # Don't even acknowledge events outside our channel, to
+                # avoid interfering with separate instances in other
+                # channels.
+                return
             ack_event()
             try:
                 bug = make_bug(channel=payload.container.channel_id,
