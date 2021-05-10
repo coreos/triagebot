@@ -422,18 +422,18 @@ def process_event(config, socket_client, req):
                         thread_ts=payload.container.message_ts)
                 return
             if bug.product != config.bugzilla_product:
-                status = f'Bug now in *{escape(bug.product)}*/*{escape(bug.component)}*. :gift:'
+                status = f'Bug now in *{escape(bug.product)}*/*{escape(bug.component)}*.'
             elif bug.component != config.bugzilla_component:
-                status = f'Bug now in *{escape(bug.component)}*. :gift:'
+                status = f'Bug now in *{escape(bug.component)}*.'
             elif bug.status == 'CLOSED':
-                status = f'Bug now *CLOSED/{escape(bug.resolution)}*. :ballot_box_with_check:'
+                status = f'Bug now *CLOSED/{escape(bug.resolution)}*.'
             elif bug.status == 'NEW':
                 client.chat_postMessage(channel=payload.container.channel_id,
                         text=f"<@{payload.user.id}> Bug still in component {escape(config.bugzilla_component)} and status NEW, cannot resolve.",
                         thread_ts=payload.container.message_ts)
                 return
             else:
-                status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to)}*. :bust_in_silhouette:'
+                status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to)}*.'
             bug.resolve()
             bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
 
