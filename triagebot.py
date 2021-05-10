@@ -63,7 +63,14 @@ class Database(object):
                         'id text not null)')
                 self._db.execute('create unique index specials_messages '
                         'on specials (channel, id)')
-                self._db.execute('pragma user_version = 2')
+            if ver < 3:
+                self._db.execute('create table events '
+                        '(added integer not null, '
+                        'channel text not null, '
+                        'timestamp text not null)')
+                self._db.execute('create unique index events_unique '
+                        'on events (channel, timestamp)')
+                self._db.execute('pragma user_version = 3')
 
     def __enter__(self):
         '''Start a database transaction.'''
@@ -107,6 +114,19 @@ class Database(object):
         if res is None:
             raise KeyError
         return res
+
+    def add_event(self, channel, ts):
+        '''Return False if the event is already present.'''
+        try:
+            self._db.execute('insert into events (added, channel, timestamp) '
+                    'values (?, ?, ?)', (int(time.time()), channel, ts))
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def prune_events(self, max_age=3600):
+        self._db.execute('delete from events where added < ?',
+                (int(time.time() - max_age),))
 
 
 class Bug(object):
@@ -302,6 +322,10 @@ def process_event(config, socket_client, req):
                 # channels.
                 return
             ack_event()
+            if not db.add_event(payload.event.channel, payload.event.event_ts):
+                # When we ignore some events, Slack can send us duplicate
+                # retries.  Detect and ignore those after acknowledging.
+                return
             message = payload.event.text.replace(f'<@{config.bot_id}>', '').strip()
             if message == 'unresolve':
                 if 'thread_ts' not in payload.event:
@@ -366,6 +390,11 @@ def process_event(config, socket_client, req):
                 # channels.
                 return
             ack_event()
+            if not db.add_event(payload.container.channel_id, payload.actions[0].action_ts):
+                # In case Slack sends duplicate action notifications, detect
+                # and ignore them after acknowledging, since we have the
+                # infrastructure anyway.
+                return
             try:
                 bug = make_bug(channel=payload.container.channel_id,
                         ts=payload.container.message_ts)
@@ -436,6 +465,7 @@ def check_bugzilla(config, bzapi, client, db):
             if not Bug.is_posted(db, bz.id):
                 Bug(config, client, bzapi, db, bz=bz.id).post()
     with db:
+        db.prune_events()
         update_watchdog(config, client, db)
 
 
