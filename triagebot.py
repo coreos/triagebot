@@ -132,8 +132,12 @@ class Bug(object):
             assert channel is not None and ts is not None
             # raises KeyError on unknown timestamp
             self.bz, self.resolved = db.lookup_ts(channel, ts)
-        details = bzapi.getbug(self.bz, include_fields=['summary'])
-        self.summary = details.summary
+        fields = ['summary', 'product', 'component', 'assigned_to', 'status',
+                'resolution']
+        details = bzapi.getbug(self.bz, include_fields=fields)
+        for field in fields:
+            setattr(self, field, getattr(details, field))
+        self.assigned_to = details.assigned_to_detail['real_name']
 
     def __str__(self):
         return f'[{self.bz}] {self.summary}'
@@ -360,8 +364,21 @@ def process_event(config, socket_client, req):
                         text=f"<@{payload.user.id}> Couldn't find a record of this bug.",
                         thread_ts=payload.container.message_ts)
                 return
+            if bug.product != config.bugzilla_product:
+                status = f'Bug now in *{bug.product}*/*{bug.component}*. :gift:'
+            elif bug.component != config.bugzilla_component:
+                status = f'Bug now in *{bug.component}*. :gift:'
+            elif bug.status == 'CLOSED':
+                status = f'Bug now *CLOSED/{bug.resolution}*. :ballot_box_with_check:'
+            elif bug.status == 'NEW':
+                client.chat_postMessage(channel=payload.container.channel_id,
+                        text=f"<@{payload.user.id}> Bug still in component {config.bugzilla_component} and status NEW, cannot resolve.",
+                        thread_ts=payload.container.message_ts)
+                return
+            else:
+                status = f'Bug now *{bug.status}*, assigned to *{bug.assigned_to}*. :bust_in_silhouette:'
             bug.resolve()
-            bug.log(f'_Resolved by <@{payload.user.id}>.  Undo with_ `<@{config.bot_id}> unresolve`')
+            bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
 
 
 def update_watchdog(config, client, db):
