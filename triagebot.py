@@ -206,6 +206,24 @@ class Bug(object):
                     },
                 ]
             })
+        else:
+            if self.product != self._config.bugzilla_product:
+                status = f'Moved to *{escape(self.product)}*/*{escape(self.component)}*'
+            elif self.component != self._config.bugzilla_component:
+                status = f'Moved to *{escape(self.component)}*'
+            elif self.status == 'CLOSED':
+                status = f'Closed as *{escape(self.resolution)}*'
+            else:
+                status = f'Assigned to *{escape(self.assigned_to)}*'
+            blocks.append({
+                'type': 'context',
+                'elements': [
+                    {
+                        'type': 'mrkdwn',
+                        'text': status,
+                    },
+                ]
+            })
         return message, blocks
 
     def post(self):
