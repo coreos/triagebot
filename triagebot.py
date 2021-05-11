@@ -163,14 +163,14 @@ class Bug(object):
         return f'[{self.bz}] {self.summary}'
 
     @staticmethod
-    def is_posted(db, bz):
-        '''Class method returning True if we've already posted the specified
-        BZ.  This allows the Bugzilla polling loop to check whether to
-        process a BZ without constructing a Bug, since the latter makes an
-        additional Bugzilla query.'''
+    def is_unresolved(db, bz):
+        '''Class method returning True if the specified BZ is posted and
+        unresolved.  This allows the Bugzilla polling loop to check whether
+        to process a BZ without constructing a Bug, since the latter makes
+        an additional Bugzilla query.'''
         try:
-            db.lookup_bz(bz)
-            return True
+            _, _, resolved = db.lookup_bz(bz)
+            return not resolved
         except KeyError:
             return False
 
@@ -495,8 +495,18 @@ def check_bugzilla(config, bzapi, client, db):
 
     for bz in sorted(bzs):
         with db:
-            if not Bug.is_posted(db, bz):
-                Bug(config, client, bzapi, db, bz=bz).post()
+            if not Bug.is_unresolved(db, bz):
+                bug = Bug(config, client, bzapi, db, bz=bz)
+                if not bug.posted:
+                    # Unknown bug; post it
+                    bug.post()
+                else:
+                    # Resolved bug; unresolve it
+                    assert bug.resolved
+                    bug.unresolve()
+                    client.chat_postMessage(channel=bug.channel,
+                            text=f'_Bug now *{escape(bug.status)}* in *{escape(bug.component)}*, assigned to *{escape(bug.assigned_to_name)}*. Unresolving._',
+                            thread_ts=bug.ts)
     with db:
         db.prune_events()
         update_watchdog(config, client, db)
