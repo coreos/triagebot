@@ -6,10 +6,14 @@ This is a simple Slack bot to help with triaging Bugzilla issues.  It reports ne
 
 - NEW bug arrives on the configured Bugzilla product and component →
   send message to channel and pin it to the channel
+- Open bug arrives on the configured Bugzilla product and component, assigned to default assignee →
+  same behavior as NEW bug
 - "Resolve" button clicked on a bug message →
   unpin message from channel, update message to show that the bug is resolved, log resolution as threaded reply
 - Bot mentioned in `unresolve` message in bug thread →
   repin message to channel, update message to show that the bug is unresolved
+- Resolved bug is moved to NEW or to any open state with the default assignee, in the configured component →
+  same behavior as `unresolve` message; also send threaded reply noting the change in bug status
 - Bot mentioned with `track <bug-number|bug-URL>` →
   same behavior as NEW bug; also send threaded reply noting which user requested tracking
 
