@@ -477,16 +477,26 @@ def update_watchdog(config, client, db):
 
 @report_errors
 def check_bugzilla(config, bzapi, client, db):
-    ignore = set(config.get('bugzilla_ignore_bugs', []))
-    query = bzapi.build_query(product=config.bugzilla_product,
-            component=config.bugzilla_component, status='NEW',
-            include_fields=['id'])
-    for bz in bzapi.query(query):
-        if bz.id in ignore:
-            continue
+    queries = [
+        # NEW bugs
+        bzapi.build_query(product=config.bugzilla_product,
+                component=config.bugzilla_component, status='NEW'),
+        # Open bugs assigned to default assignee
+        bzapi.build_query(product=config.bugzilla_product,
+                component=config.bugzilla_component, status='__open__',
+                assigned_to=config.bugzilla_assignee),
+    ]
+    bzs = set()
+    for query in queries:
+        query['include_fields'] = ['id']
+        bzs.update(bz.id for bz in bzapi.query(query))
+    # Remove ignored bugs
+    bzs.difference_update(config.get('bugzilla_ignore_bugs', []))
+
+    for bz in sorted(bzs):
         with db:
-            if not Bug.is_posted(db, bz.id):
-                Bug(config, client, bzapi, db, bz=bz.id).post()
+            if not Bug.is_posted(db, bz):
+                Bug(config, client, bzapi, db, bz=bz).post()
     with db:
         db.prune_events()
         update_watchdog(config, client, db)

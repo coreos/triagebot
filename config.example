@@ -18,9 +18,9 @@ bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 # Bugzilla API key
 # (if not specified in TRIAGEBOT_BUGZILLA_KEY env var)
 bugzilla-key: xxx
-# Product to scan for NEW bugs
+# Product containing the bugzilla-component
 bugzilla-product: OpenShift Container Platform
-# Component to scan for NEW bugs
+# Component to scan for NEW bugs and open bugs assigned to default assignee
 bugzilla-component: RHCOS
 # Default assignee for component
 bugzilla-assignee: bovik@example.com
