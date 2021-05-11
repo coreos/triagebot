@@ -157,7 +157,7 @@ class Bug(object):
         details = bzapi.getbug(self.bz, include_fields=fields)
         for field in fields:
             setattr(self, field, getattr(details, field))
-        self.assigned_to = details.assigned_to_detail['real_name']
+        self.assigned_to_name = details.assigned_to_detail['real_name']
 
     def __str__(self):
         return f'[{self.bz}] {self.summary}'
@@ -214,7 +214,7 @@ class Bug(object):
             elif self.status == 'CLOSED':
                 status = f'Closed as *{escape(self.resolution)}*'
             else:
-                status = f'Assigned to *{escape(self.assigned_to)}*'
+                status = f'Assigned to *{escape(self.assigned_to_name)}*'
             blocks.append({
                 'type': 'context',
                 'elements': [
@@ -433,7 +433,7 @@ def process_event(config, socket_client, req):
                         thread_ts=payload.container.message_ts)
                 return
             else:
-                status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to)}*.'
+                status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to_name)}*.'
             bug.resolve()
             bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
 
