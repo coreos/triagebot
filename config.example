@@ -22,6 +22,8 @@ bugzilla-key: xxx
 bugzilla-product: OpenShift Container Platform
 # Component to scan for NEW bugs
 bugzilla-component: RHCOS
+# Default assignee for component
+bugzilla-assignee: bovik@example.com
 # Bugzilla polling interval in seconds
 bugzilla-poll-interval: 300
 # List of bug numbers to ignore

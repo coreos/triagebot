@@ -432,6 +432,11 @@ def process_event(config, socket_client, req):
                         text=f"<@{payload.user.id}> Bug still in component {escape(config.bugzilla_component)} and status NEW, cannot resolve.",
                         thread_ts=payload.container.message_ts)
                 return
+            elif bug.assigned_to == config.bugzilla_assignee:
+                client.chat_postMessage(channel=payload.container.channel_id,
+                        text=f"<@{payload.user.id}> Bug still assigned to {escape(bug.assigned_to_name)}, cannot resolve.",
+                        thread_ts=payload.container.message_ts)
+                return
             else:
                 status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to_name)}*.'
             bug.resolve()
