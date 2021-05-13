@@ -24,7 +24,7 @@ I understand these commands:
 `unresolve` (in BZ thread) - unresolve the BZ
 `refresh` (in BZ thread) - refresh the BZ description
 `track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
-`ping` - check whether the bot is running
+`ping` - check whether the bot is running properly
 `help` - print this message
 Report problems <{ISSUE_LINK}|here>.
 '''
@@ -118,6 +118,13 @@ class Database(object):
         if res is None:
             raise KeyError
         return res
+
+    def get_special_unixtime(self, name):
+        res = self._db.execute('select unixtime from specials where name == ?',
+                (name,)).fetchone()
+        if res is None:
+            raise KeyError
+        return res[0]
 
     def add_event(self, channel, ts):
         '''Return False if the event is already present.'''
@@ -394,6 +401,24 @@ def process_event(config, socket_client, req):
                 bug.log(f'_Requested by <@{payload.event.user}>._')
                 complete_command()
             elif message == 'ping':
+                # Check Bugzilla connectivity
+                try:
+                    if not bzapi.logged_in:
+                        raise Exception('Not logged in.')
+                except Exception:
+                    # Swallow exception details and just report the failure
+                    fail_command('Cannot contact Bugzilla.')
+                    return
+                # Check time since last successful poll
+                try:
+                    last_check = db.get_special_unixtime('watchdog')
+                except KeyError:
+                    fail_command('Have never successfully polled Bugzilla.')
+                    return
+                time_since_check = time.time() - last_check
+                if time_since_check > 1.5 * config.bugzilla_poll_interval:
+                    fail_command(f'Last successful Bugzilla poll was {int(time_since_check / 60)} minutes ago.')
+                    return
                 complete_command()
             elif message == 'help':
                 client.chat_postMessage(channel=payload.event.channel, text=HELP,
