@@ -70,7 +70,10 @@ class Database(object):
                         'timestamp text not null)')
                 self._db.execute('create unique index events_unique '
                         'on events (channel, timestamp)')
-                self._db.execute('pragma user_version = 3')
+            if ver < 4:
+                self._db.execute('alter table specials add column '
+                        'unixtime integer not null default 0')
+                self._db.execute('pragma user_version = 4')
 
     def __enter__(self):
         '''Start a database transaction.'''
@@ -105,8 +108,9 @@ class Database(object):
         return bz, bool(resolved)
 
     def set_special(self, name, channel, id):
-        self._db.execute('insert or replace into specials (name, channel, id) '
-                'values (?, ?, ?)', (name, channel, id))
+        self._db.execute('insert or replace into specials '
+                '(name, channel, id, unixtime) values (?, ?, ?, ?)',
+                (name, channel, id, int(time.time())))
 
     def lookup_special(self, name):
         res = self._db.execute('select channel, id from specials where '
