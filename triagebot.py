@@ -334,7 +334,7 @@ def process_event(config, socket_client, req):
     def complete_command():
         '''Add a success emoji to a command mention.'''
         client.reactions_add(channel=payload.event.channel,
-                name='white_check_mark', timestamp=payload.event.ts)
+                name='ballot_box_with_check', timestamp=payload.event.ts)
 
     def fail_command(message):
         '''Reply to a command mention with an error.'''
