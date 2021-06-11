@@ -48,7 +48,8 @@ class Database:
         # Use DB locking to protect against races between the Bugzilla
         # polling thread and the track command, and to avoid SQLITE_BUSY on
         # lock upgrade.  We're not performance-critical.
-        self._db = sqlite3.connect(config.database, isolation_level='immediate')
+        self._db = sqlite3.connect(config.database, isolation_level='immediate',
+                timeout=60)
         with self:
             ver = self._db.execute('pragma user_version').fetchone()[0]
             if ver < 1:
