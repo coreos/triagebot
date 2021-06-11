@@ -397,7 +397,7 @@ def process_event(config, socket_client, req):
                 if bug.posted:
                     link = client.chat_getPermalink(channel=bug.channel,
                             message_ts=bug.ts)["permalink"]
-                    fail_command(f"Bug {bz} already tracked: {link}")
+                    fail_command(f"Bug {bz} <{link}|already tracked>.")
                     return
                 bug.post()
                 bug.log(f'_Requested by <@{payload.event.user}>._')
