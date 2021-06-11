@@ -26,6 +26,7 @@ I understand these commands:
 `unresolve` (in BZ thread) - unresolve the BZ
 `refresh` (in BZ thread) - refresh the BZ description
 `track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
+`report` - summarize unresolved bugs to the channel
 `ping` - check whether the bot is running properly
 `help` - print this message
 Report problems <{ISSUE_LINK}|here>.
@@ -75,7 +76,10 @@ class Database:
             if ver < 4:
                 self._db.execute('alter table specials add column '
                         'unixtime integer not null default 0')
-                self._db.execute('pragma user_version = 4')
+            if ver < 5:
+                self._db.execute('create index bugs_resolved on bugs '
+                        '(resolved)')
+                self._db.execute('pragma user_version = 5')
 
     def __enter__(self):
         '''Start a database transaction.'''
@@ -92,6 +96,11 @@ class Database:
     def set_resolved(self, bz, resolved=True):
         self._db.execute('update bugs set resolved = ? where bz == ?',
                 (int(resolved), bz))
+
+    def list_unresolved(self):
+        res = self._db.execute('select bz from bugs where '
+                'resolved == 0').fetchall()
+        return [r[0] for r in res]
 
     def lookup_bz(self, bz):
         res = self._db.execute('select channel, timestamp, resolved '
@@ -186,6 +195,11 @@ class Bug:
             return not resolved
         except KeyError:
             return False
+
+    @classmethod
+    def list_unresolved(cls, config, client, bzapi, db):
+        for bz in sorted(db.list_unresolved()):
+            yield cls(config, client, bzapi, db, bz=bz)
 
     @property
     def posted(self):
@@ -287,6 +301,33 @@ class Bug:
         assert self.posted
         self._client.chat_postMessage(channel=self.channel, text=message,
                 thread_ts=self.ts)
+
+
+def post_report(config, client, bzapi, db):
+    '''Post a summary of unresolved bugs to the channel.  Return the channel
+    and timestamp.'''
+    parts = []
+    for bug in Bug.list_unresolved(config, client, bzapi, db):
+        link = client.chat_getPermalink(channel=bug.channel,
+                message_ts=bug.ts)["permalink"]
+        part = f':bugzilla: <{config.bugzilla_bug_url}{bug.bz}|[{bug.bz}]> <{link}|{escape(bug.summary)}>'
+        parts.append(part)
+    if not parts:
+        parts.append('_No bugs!_')
+    message = '\n'.join(['*Unresolved bug summary:*'] + parts)
+    blocks = [
+        {
+            'type': 'section',
+            'text': {
+                'type': 'mrkdwn',
+                'text': message,
+            }
+        }
+    ]
+    ts = client.chat_postMessage(channel=config.channel,
+            text=message, blocks=blocks, unfurl_links=False,
+            unfurl_media=False)['ts']
+    return config.channel, ts
 
 
 def report_errors(f):
@@ -402,6 +443,22 @@ def process_event(config, socket_client, req):
                 bug.post()
                 bug.log(f'_Requested by <@{payload.event.user}>._')
                 complete_command()
+            elif message == 'report':
+                # Post unscheduled report to the channel
+                # We make a potentially large number of BZ queries; tell
+                # the user we're working
+                client.reactions_add(channel=payload.event.channel,
+                        timestamp=payload.event.ts,
+                        name='hourglass_flowing_sand')
+                try:
+                    channel, ts = post_report(config, client, bzapi, db)
+                    client.chat_postMessage(channel=channel, thread_ts=ts,
+                            text=f'_Requested by <@{payload.event.user}>._')
+                finally:
+                    client.reactions_remove(channel=payload.event.channel,
+                            timestamp=payload.event.ts,
+                            name='hourglass_flowing_sand')
+                complete_command()
             elif message == 'ping':
                 # Check Bugzilla connectivity
                 try:
@@ -483,6 +540,7 @@ class Scheduler:
         self._jobs = []
         self._add_job(self._check_bugzilla, 'bugzilla_poll_schedule',
                 '*/5 * * * * 20', True)
+        self._add_job(self._post_report, 'report_schedule')
 
     def _add_job(self, fn, config_key, default=None, immediate=False):
         schedule = self._config.get(config_key, default)
@@ -581,6 +639,10 @@ class Scheduler:
                     print(e)
         # Update DB
         self._db.set_special(name, self._config.channel, new_id)
+
+    def _post_report(self, _config):
+        with self._db:
+            post_report(self._config, self._client, self._bzapi, self._db)
 
 
 def main():

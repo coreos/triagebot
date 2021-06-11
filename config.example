@@ -13,6 +13,8 @@ watchdog-minutes: 30
 
 # When to poll Bugzilla.  Cron syntax, with an extra field for seconds.
 bugzilla-poll-schedule: "*/5 * * * * 20"
+# When to summarize unresolved bugs to the channel.  Optional.
+report-schedule: "0 9 * * 1"
 
 # Hostname of the Bugzilla server
 bugzilla: bugzilla.redhat.com
