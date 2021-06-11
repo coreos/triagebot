@@ -472,73 +472,85 @@ def process_event(config, socket_client, req):
             bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
 
 
-def update_watchdog(config, client, db):
-    '''Reschedule the message-in-a-bottle that warns of a bot failure.'''
-    # First, add new message
-    expiration = int(time.time() + 60 * config.watchdog_minutes)
-    message = f":robot_face: If you're seeing this, I haven't completed a Bugzilla check in {config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead."
-    new_id = client.chat_scheduleMessage(channel=config.channel,
-            post_at=expiration, text=message)['scheduled_message_id']
-    # Then delete the old one
-    name = 'watchdog'
-    try:
-        old_channel, old_id = db.lookup_special(name)
-    except KeyError:
-        # No previous message
-        pass
-    else:
+class Scheduler:
+    def __init__(self, config, client, bzapi, db):
+        self._config = config
+        self._bzapi = bzapi
+        self._client = client
+        self._db = db
+
+    def run(self):
+        while True:
+            report_errors(self._check_bugzilla)(self._config)
+            time.sleep(self._config.get('bugzilla_poll_interval', 300))
+
+    def _check_bugzilla(self, _config):
+        queries = [
+            # NEW bugs
+            self._bzapi.build_query(product=self._config.bugzilla_product,
+                    component=self._config.bugzilla_component, status='NEW'),
+            # Open bugs assigned to default assignee
+            self._bzapi.build_query(product=self._config.bugzilla_product,
+                    component=self._config.bugzilla_component,
+                    status='__open__',
+                    assigned_to=self._config.bugzilla_assignee),
+        ]
+        bzs = set()
+        for query in queries:
+            query['include_fields'] = ['id']
+            bzs.update(bz.id for bz in self._bzapi.query(query))
+        # Remove ignored bugs
+        bzs.difference_update(self._config.get('bugzilla_ignore_bugs', []))
+
+        for bz in sorted(bzs):
+            with self._db:
+                if not Bug.is_unresolved(self._db, bz):
+                    bug = Bug(self._config, self._client, self._bzapi,
+                            self._db, bz=bz)
+                    if not bug.posted:
+                        # Unknown bug; post it
+                        bug.post()
+                    else:
+                        # Resolved bug; unresolve it
+                        assert bug.resolved
+                        bug.unresolve()
+                        self._client.chat_postMessage(channel=bug.channel,
+                                text=f'_Bug now *{escape(bug.status)}* in *{escape(bug.component)}*, assigned to *{escape(bug.assigned_to_name)}*. Unresolving._',
+                                thread_ts=bug.ts)
+        with self._db:
+            self._db.prune_events()
+            self._update_watchdog()
+
+    def _update_watchdog(self):
+        '''Reschedule the message-in-a-bottle that warns of a bot failure.'''
+        # First, add new message
+        expiration = int(time.time() + 60 * self._config.watchdog_minutes)
+        message = f":robot_face: If you're seeing this, I haven't completed a Bugzilla check in {self._config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead."
+        new_id = self._client.chat_scheduleMessage(channel=self._config.channel,
+                post_at=expiration, text=message)['scheduled_message_id']
+        # Then delete the old one
+        name = 'watchdog'
         try:
-            client.chat_deleteScheduledMessage(channel=old_channel,
-                    scheduled_message_id=old_id)
-        except SlackApiError as e:
-            if e.response['error'] == 'invalid_scheduled_message_id':
-                # Watchdog timer already fired.  Report that we're back.
-                client.chat_postMessage(channel=config.channel,
-                        text='_is back_')
-            else:
-                # Unexpected error.  We already rescheduled the timer, and
-                # it doesn't seem like we should abort the transaction for
-                # this.  Just log it.
-                print(e)
-    # Update DB
-    db.set_special(name, config.channel, new_id)
-
-
-@report_errors
-def check_bugzilla(config, bzapi, client, db):
-    queries = [
-        # NEW bugs
-        bzapi.build_query(product=config.bugzilla_product,
-                component=config.bugzilla_component, status='NEW'),
-        # Open bugs assigned to default assignee
-        bzapi.build_query(product=config.bugzilla_product,
-                component=config.bugzilla_component, status='__open__',
-                assigned_to=config.bugzilla_assignee),
-    ]
-    bzs = set()
-    for query in queries:
-        query['include_fields'] = ['id']
-        bzs.update(bz.id for bz in bzapi.query(query))
-    # Remove ignored bugs
-    bzs.difference_update(config.get('bugzilla_ignore_bugs', []))
-
-    for bz in sorted(bzs):
-        with db:
-            if not Bug.is_unresolved(db, bz):
-                bug = Bug(config, client, bzapi, db, bz=bz)
-                if not bug.posted:
-                    # Unknown bug; post it
-                    bug.post()
+            old_channel, old_id = self._db.lookup_special(name)
+        except KeyError:
+            # No previous message
+            pass
+        else:
+            try:
+                self._client.chat_deleteScheduledMessage(channel=old_channel,
+                        scheduled_message_id=old_id)
+            except SlackApiError as e:
+                if e.response['error'] == 'invalid_scheduled_message_id':
+                    # Watchdog timer already fired.  Report that we're back.
+                    self._client.chat_postMessage(channel=self._config.channel,
+                            text='_is back_')
                 else:
-                    # Resolved bug; unresolve it
-                    assert bug.resolved
-                    bug.unresolve()
-                    client.chat_postMessage(channel=bug.channel,
-                            text=f'_Bug now *{escape(bug.status)}* in *{escape(bug.component)}*, assigned to *{escape(bug.assigned_to_name)}*. Unresolving._',
-                            thread_ts=bug.ts)
-    with db:
-        db.prune_events()
-        update_watchdog(config, client, db)
+                    # Unexpected error.  We already rescheduled the timer, and
+                    # it doesn't seem like we should abort the transaction for
+                    # this.  Just log it.
+                    print(e)
+        # Update DB
+        self._db.set_special(name, self._config.channel, new_id)
 
 
 def main():
@@ -581,10 +593,8 @@ def main():
             lambda socket_client, req: process_event(config, socket_client, req))
     socket_client.connect()
 
-    # Run Bugzilla polling loop
-    while True:
-        check_bugzilla(config, bzapi, client, db)
-        time.sleep(config.get('bugzilla_poll_interval', 300))
+    # Run scheduler
+    Scheduler(config, client, bzapi, db).run()
 
 
 if __name__ == '__main__':
