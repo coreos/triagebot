@@ -482,15 +482,16 @@ class Scheduler:
         self._db = db
         self._jobs = []
         self._add_job(self._check_bugzilla, 'bugzilla_poll_schedule',
-                '*/5 * * * * 20')
+                '*/5 * * * * 20', True)
 
-    def _add_job(self, fn, config_key, default=None):
+    def _add_job(self, fn, config_key, default=None, immediate=False):
         schedule = self._config.get(config_key, default)
         if schedule is not None:
             cron = croniter(schedule)
+            next = 0 if immediate else cron.next()
             # add the list length as a tiebreaker when sorting, so we don't
             # try to compare two fns
-            heappush(self._jobs, (cron.next(), len(self._jobs), fn, cron))
+            heappush(self._jobs, (next, len(self._jobs), fn, cron))
 
     def run(self):
         while True:
