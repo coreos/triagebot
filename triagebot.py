@@ -40,7 +40,7 @@ def escape(message):
     return reduce(lambda s, p: s.replace(p[0], p[1]), map.items(), message)
 
 
-class Database(object):
+class Database:
     def __init__(self, config):
         # Use DB locking to protect against races between the Bugzilla
         # polling thread and the track command, and to avoid SQLITE_BUSY on
@@ -140,7 +140,7 @@ class Database(object):
                 (int(time.time() - max_age),))
 
 
-class Bug(object):
+class Bug:
     # Database transactions must be supplied by the caller.
 
     def __init__(self, config, client, bzapi, db, bz=None, channel=None,
