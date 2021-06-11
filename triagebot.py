@@ -4,8 +4,10 @@
 
 import argparse
 import bugzilla
+from croniter import croniter
 from dotted_dict import DottedDict
 from functools import reduce, wraps
+from heapq import heappop, heappush
 import os
 import requests
 from slack_sdk import WebClient
@@ -478,11 +480,38 @@ class Scheduler:
         self._bzapi = bzapi
         self._client = client
         self._db = db
+        self._jobs = []
+        self._add_job(self._check_bugzilla, 'bugzilla_poll_schedule',
+                '*/5 * * * * 20')
+
+    def _add_job(self, fn, config_key, default=None):
+        schedule = self._config.get(config_key, default)
+        if schedule is not None:
+            cron = croniter(schedule)
+            # add the list length as a tiebreaker when sorting, so we don't
+            # try to compare two fns
+            heappush(self._jobs, (cron.next(), len(self._jobs), fn, cron))
 
     def run(self):
         while True:
-            report_errors(self._check_bugzilla)(self._config)
-            time.sleep(self._config.get('bugzilla_poll_interval', 300))
+            # get the next job that's due
+            next, idx, fn, cron = heappop(self._jobs)
+            # wait for the scheduled time, allowing for spurious wakeups
+            while True:
+                now = time.clock_gettime(time.CLOCK_REALTIME)
+                if now >= next:
+                    break
+                time.sleep(next - now)
+            # run the job, passing the config to make report_errors() happy
+            report_errors(fn)(self._config)
+            # schedule the next run, skipping any times that are already
+            # in the past
+            now = time.clock_gettime(time.CLOCK_REALTIME)
+            while True:
+                next = cron.next()
+                if next > now:
+                    break
+            heappush(self._jobs, (next, idx, fn, cron))
 
     def _check_bugzilla(self, _config):
         queries = [

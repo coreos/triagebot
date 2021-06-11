@@ -11,6 +11,9 @@ error-notification: Uxxx
 # How long of an outage to allow before the channel is notified
 watchdog-minutes: 30
 
+# When to poll Bugzilla.  Cron syntax, with an extra field for seconds.
+bugzilla-poll-schedule: "*/5 * * * * 20"
+
 # Hostname of the Bugzilla server
 bugzilla: bugzilla.redhat.com
 # Prefix of user-friendly bug URL
@@ -24,7 +27,5 @@ bugzilla-product: OpenShift Container Platform
 bugzilla-component: RHCOS
 # Default assignee for component
 bugzilla-assignee: bovik@example.com
-# Bugzilla polling interval in seconds
-bugzilla-poll-interval: 300
 # List of bug numbers to ignore
 bugzilla-ignore-bugs: []

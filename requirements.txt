@@ -1,3 +1,4 @@
+croniter
 dotted-dict
 python-bugzilla
 PyYAML
