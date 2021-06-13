@@ -101,7 +101,7 @@ class Database:
 
     def list_unresolved(self):
         res = self._db.execute('select bz from bugs where '
-                'resolved == 0').fetchall()
+                'resolved == 0 order by timestamp').fetchall()
         return [r[0] for r in res]
 
     def lookup_bz(self, bz):
@@ -200,7 +200,7 @@ class Bug:
 
     @classmethod
     def list_unresolved(cls, config, client, bzapi, db):
-        for bz in sorted(db.list_unresolved()):
+        for bz in db.list_unresolved():
             yield cls(config, client, bzapi, db, bz=bz)
 
     @property
