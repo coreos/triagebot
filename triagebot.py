@@ -310,9 +310,10 @@ def post_report(config, client, bzapi, db):
     and timestamp.'''
     parts = []
     for bug in Bug.list_unresolved(config, client, bzapi, db):
+        age_days = int((time.time() - float(bug.ts)) / 86400)
         link = client.chat_getPermalink(channel=bug.channel,
                 message_ts=bug.ts)["permalink"]
-        part = f':bugzilla: <{config.bugzilla_bug_url}{bug.bz}|[{bug.bz}]> <{link}|{escape(bug.summary)}>'
+        part = f':bugzilla: <{config.bugzilla_bug_url}{bug.bz}|[{bug.bz}]> <{link}|{escape(bug.summary)}> ({age_days} days)'
         parts.append(part)
     if not parts:
         parts.append('_No bugs!_')
