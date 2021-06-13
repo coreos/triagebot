@@ -547,31 +547,31 @@ class Scheduler:
         schedule = self._config.get(config_key, default)
         if schedule is not None:
             cron = croniter(schedule)
-            next = 0 if immediate else cron.next()
+            nex = 0 if immediate else next(cron)
             # add the list length as a tiebreaker when sorting, so we don't
             # try to compare two fns
-            heappush(self._jobs, (next, len(self._jobs), fn, cron))
+            heappush(self._jobs, (nex, len(self._jobs), fn, cron))
 
     def run(self):
         while True:
             # get the next job that's due
-            next, idx, fn, cron = heappop(self._jobs)
+            nex, idx, fn, cron = heappop(self._jobs)
             # wait for the scheduled time, allowing for spurious wakeups
             while True:
                 now = time.time()
-                if now >= next:
+                if now >= nex:
                     break
-                time.sleep(next - now)
+                time.sleep(nex - now)
             # run the job, passing the config to make report_errors() happy
             report_errors(fn)(self._config)
             # schedule the next run, skipping any times that are already
             # in the past
             now = time.time()
             while True:
-                next = cron.next()
-                if next > now:
+                nex = next(cron)
+                if nex > now:
                     break
-            heappush(self._jobs, (next, idx, fn, cron))
+            heappush(self._jobs, (nex, idx, fn, cron))
 
     def _check_bugzilla(self, _config):
         queries = [
