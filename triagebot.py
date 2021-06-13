@@ -558,7 +558,7 @@ class Scheduler:
             next, idx, fn, cron = heappop(self._jobs)
             # wait for the scheduled time, allowing for spurious wakeups
             while True:
-                now = time.clock_gettime(time.CLOCK_REALTIME)
+                now = time.time()
                 if now >= next:
                     break
                 time.sleep(next - now)
@@ -566,7 +566,7 @@ class Scheduler:
             report_errors(fn)(self._config)
             # schedule the next run, skipping any times that are already
             # in the past
-            now = time.clock_gettime(time.CLOCK_REALTIME)
+            now = time.time()
             while True:
                 next = cron.next()
                 if next > now:
