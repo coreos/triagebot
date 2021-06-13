@@ -8,6 +8,7 @@ from croniter import croniter
 from dotted_dict import DottedDict
 from functools import reduce, wraps
 from heapq import heappop, heappush
+from itertools import count
 import os
 import requests
 from slack_sdk import WebClient
@@ -539,23 +540,29 @@ class Scheduler:
         self._client = client
         self._db = db
         self._jobs = []
-        self._add_job(self._check_bugzilla, 'bugzilla_poll_schedule',
-                '*/5 * * * * 20', True)
-        self._add_job(self._post_report, 'report_schedule')
+        self._add_timer(self._check_bugzilla, 'bugzilla_poll_interval', 300)
+        self._add_cron(self._post_report, 'report_schedule')
 
-    def _add_job(self, fn, config_key, default=None, immediate=False):
+    def _add_cron(self, fn, config_key, default=None):
         schedule = self._config.get(config_key, default)
         if schedule is not None:
-            cron = croniter(schedule)
-            nex = 0 if immediate else next(cron)
+            it = croniter(schedule)
             # add the list length as a tiebreaker when sorting, so we don't
             # try to compare two fns
-            heappush(self._jobs, (nex, len(self._jobs), fn, cron))
+            heappush(self._jobs, (next(it), len(self._jobs), fn, it))
+
+    def _add_timer(self, fn, config_key, default=None):
+        interval = self._config.get(config_key, default)
+        if interval is not None:
+            it = count(int(time.time()), interval)
+            # add the list length as a tiebreaker when sorting, so we don't
+            # try to compare two fns
+            heappush(self._jobs, (next(it), len(self._jobs), fn, it))
 
     def run(self):
         while True:
             # get the next job that's due
-            nex, idx, fn, cron = heappop(self._jobs)
+            nex, idx, fn, it = heappop(self._jobs)
             # wait for the scheduled time, allowing for spurious wakeups
             while True:
                 now = time.time()
@@ -568,10 +575,10 @@ class Scheduler:
             # in the past
             now = time.time()
             while True:
-                nex = next(cron)
+                nex = next(it)
                 if nex > now:
                     break
-            heappush(self._jobs, (nex, idx, fn, cron))
+            heappush(self._jobs, (nex, idx, fn, it))
 
     def _check_bugzilla(self, _config):
         queries = [
