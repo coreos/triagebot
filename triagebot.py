@@ -9,6 +9,7 @@ from dotted_dict import DottedDict
 from functools import reduce, wraps
 from heapq import heappop, heappush
 from itertools import count
+import json
 import os
 import requests
 from slack_sdk import WebClient
@@ -341,7 +342,7 @@ def report_errors(f):
     def wrapper(config, *args, **kwargs):
         try:
             return f(config, *args, **kwargs)
-        except (requests.ConnectionError, requests.HTTPError) as e:
+        except (json.JSONDecodeError, requests.ConnectionError, requests.HTTPError) as e:
             # Exception type leaked from the bugzilla API.  Assume transient
             # network problem; don't send message.
             print(e)
