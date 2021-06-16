@@ -623,7 +623,7 @@ class Scheduler:
         '''Reschedule the message-in-a-bottle that warns of a bot failure.'''
         # First, add new message
         expiration = int(time.time() + 60 * self._config.watchdog_minutes)
-        message = f":robot_face: If you're seeing this, I haven't completed a Bugzilla check in {self._config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead."
+        message = f":robot_face: If you're seeing this, I haven't completed a Bugzilla check in {self._config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead, or Bugzilla may be down."
         new_id = self._client.chat_scheduleMessage(channel=self._config.channel,
                 post_at=expiration, text=message)['scheduled_message_id']
         # Then delete the old one
