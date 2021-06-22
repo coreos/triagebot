@@ -342,7 +342,7 @@ def report_errors(f):
     def wrapper(config, *args, **kwargs):
         try:
             return f(config, *args, **kwargs)
-        except (json.JSONDecodeError, requests.ConnectionError, requests.HTTPError) as e:
+        except (json.JSONDecodeError, requests.ConnectionError, requests.HTTPError, requests.ReadTimeout) as e:
             # Exception type leaked from the bugzilla API.  Assume transient
             # network problem; don't send message.
             print(e)
