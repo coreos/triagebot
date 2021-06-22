@@ -16,6 +16,7 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
+import socket
 import sqlite3
 import time
 import traceback
@@ -346,7 +347,7 @@ def report_errors(f):
             # Exception type leaked from the bugzilla API.  Assume transient
             # network problem; don't send message.
             print(e)
-        except URLError as e:
+        except (socket.timeout, URLError) as e:
             # Exception type leaked from the slack_sdk API.  Assume transient
             # network problem; don't send message.
             print(e)
