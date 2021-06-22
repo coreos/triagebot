@@ -9,18 +9,14 @@ from dotted_dict import DottedDict
 from functools import reduce, wraps
 from heapq import heappop, heappush
 from itertools import count
-import json
 import os
-import requests
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
-import socket
 import sqlite3
 import time
 import traceback
-from urllib.error import URLError
 import yaml
 
 ISSUE_LINK = 'https://github.com/bgilbert/triagebot/issues'
@@ -339,6 +335,7 @@ def report_errors(f):
     '''Decorator that sends exceptions to an administrator via Slack DM
     and then swallows them.  The first argument of the function must be
     the config.'''
+    import json, requests, socket, urllib.error
     @wraps(f)
     def wrapper(config, *args, **kwargs):
         try:
@@ -347,7 +344,7 @@ def report_errors(f):
             # Exception type leaked from the bugzilla API.  Assume transient
             # network problem; don't send message.
             print(e)
-        except (socket.timeout, URLError) as e:
+        except (socket.timeout, urllib.error.URLError) as e:
             # Exception type leaked from the slack_sdk API.  Assume transient
             # network problem; don't send message.
             print(e)
