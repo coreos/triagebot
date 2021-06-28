@@ -316,18 +316,8 @@ def post_report(config, client, bzapi, db):
     if not parts:
         parts.append('_No bugs!_')
     message = '\n'.join(['*Unresolved bug summary:*'] + parts)
-    blocks = [
-        {
-            'type': 'section',
-            'text': {
-                'type': 'mrkdwn',
-                'text': message,
-            }
-        }
-    ]
     ts = client.chat_postMessage(channel=config.channel,
-            text=message, blocks=blocks, unfurl_links=False,
-            unfurl_media=False)['ts']
+            text=message, unfurl_links=False, unfurl_media=False)['ts']
     return config.channel, ts
 
 
