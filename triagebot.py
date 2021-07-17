@@ -450,9 +450,7 @@ def process_event(config, socket_client, req):
                         timestamp=payload.event.ts,
                         name='hourglass_flowing_sand')
                 try:
-                    channel, ts = post_report(config, client, bzapi, db)
-                    client.chat_postMessage(channel=channel, thread_ts=ts,
-                            text=f'_Requested by <@{payload.event.user}>._')
+                    post_report(config, client, bzapi, db)
                 finally:
                     client.reactions_remove(channel=payload.event.channel,
                             timestamp=payload.event.ts,
