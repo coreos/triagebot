@@ -83,7 +83,8 @@ class Database:
 
     def __enter__(self):
         '''Start a database transaction.'''
-        return self._db.__enter__()
+        self._db.__enter__()
+        return self
 
     def __exit__(self, *args, **kwargs):
         '''Commit a database transaction.'''
