@@ -86,9 +86,13 @@ class Database:
         self._db.__enter__()
         return self
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, exc_type, exc_value, tb):
         '''Commit a database transaction.'''
-        return self._db.__exit__(*args, **kwargs)
+        if exc_type is HandledError:
+            # propagate exception but commit anyway
+            self._db.__exit__(None, None, None)
+            return False
+        return self._db.__exit__(exc_type, exc_value, tb)
 
     def add_bug(self, bz, channel, ts):
         self._db.execute('insert into bugs (bz, channel, timestamp) '
@@ -322,6 +326,11 @@ def post_report(config, client, bzapi, db):
     return config.channel, ts
 
 
+class HandledError(Exception):
+    '''An exception which should just be swallowed.'''
+    pass
+
+
 def report_errors(f):
     '''Decorator that sends exceptions to an administrator via Slack DM
     and then swallows them.  The first argument of the function must be
@@ -331,6 +340,8 @@ def report_errors(f):
     def wrapper(config, *args, **kwargs):
         try:
             return f(config, *args, **kwargs)
+        except HandledError:
+            pass
         except (json.JSONDecodeError, requests.ConnectionError, requests.HTTPError, requests.ReadTimeout) as e:
             # Exception type leaked from the bugzilla API.  Assume transient
             # network problem; don't send message.
@@ -378,6 +389,7 @@ def process_event(config, socket_client, req):
                 text=f"<@{payload.event.user}> {message}",
                 # start a new thread or continue the existing one
                 thread_ts=payload.event.get('thread_ts', payload.event.ts))
+        raise HandledError()
 
     with db:
         if req.type == 'events_api' and payload.event.type == 'app_mention':
@@ -395,25 +407,21 @@ def process_event(config, socket_client, req):
             if message == 'unresolve':
                 if 'thread_ts' not in payload.event:
                     fail_command('`unresolve` command must be used in a thread.')
-                    return
                 try:
                     bug = make_bug(channel=payload.event.channel,
                             ts=payload.event.thread_ts)
                 except KeyError:
                     fail_command("Couldn't find a BZ matching this thread.")
-                    return
                 bug.unresolve()
                 complete_command()
             elif message == 'refresh':
                 if 'thread_ts' not in payload.event:
                     fail_command('`refresh` command must be used in a thread.')
-                    return
                 try:
                     bug = make_bug(channel=payload.event.channel,
                             ts=payload.event.thread_ts)
                 except KeyError:
                     fail_command("Couldn't find a BZ matching this thread.")
-                    return
                 bug.update_message()
                 complete_command()
             elif message.startswith('track '):
@@ -426,13 +434,11 @@ def process_event(config, socket_client, req):
                             strip(' <>'))
                 except ValueError:
                     fail_command("Invalid bug number.")
-                    return
                 bug = make_bug(bz=bz)
                 if bug.posted:
                     link = client.chat_getPermalink(channel=bug.channel,
                             message_ts=bug.ts)["permalink"]
                     fail_command(f"Bug {bz} <{link}|already tracked>.")
-                    return
                 bug.post()
                 bug.log(f'_Requested by <@{payload.event.user}>._')
                 complete_command()
@@ -460,17 +466,14 @@ def process_event(config, socket_client, req):
                 except Exception:
                     # Swallow exception details and just report the failure
                     fail_command('Cannot contact Bugzilla.')
-                    return
                 # Check time since last successful poll
                 try:
                     last_check = db.get_special_unixtime('watchdog')
                 except KeyError:
                     fail_command('Have never successfully polled Bugzilla.')
-                    return
                 time_since_check = time.time() - last_check
                 if time_since_check > 1.5 * config.bugzilla_poll_interval:
                     fail_command(f'Last successful Bugzilla poll was {int(time_since_check / 60)} minutes ago.')
-                    return
                 complete_command()
             elif message == 'help':
                 client.chat_postMessage(channel=payload.event.channel, text=HELP,
