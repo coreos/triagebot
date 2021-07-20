@@ -350,13 +350,13 @@ def report_errors(f):
             # Exception type leaked from the slack_sdk API.  Assume transient
             # network problem; don't send message.
             print(e)
-        except Exception as e:
+        except Exception:
             try:
                 message = f'Caught exception:\n```\n{traceback.format_exc()}```'
                 client = WebClient(token=config.slack_token)
                 channel = client.conversations_open(users=[config.error_notification])['channel']['id']
                 client.chat_postMessage(channel=channel, text=message)
-            except Exception as e:
+            except Exception:
                 traceback.print_exc()
     return wrapper
 
