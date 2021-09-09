@@ -30,7 +30,7 @@ env/bin/pip install -r requirements.txt
 env/bin/python triagebot.py
 ```
 
-Alternatively, a [container image](https://quay.io/repository/bgilbert/triagebot) is available.
+Alternatively, a [container image](https://quay.io/repository/coreos/triagebot) is available.
 
 You'll also need to set up a Slack app in your workspace and get an API token for it, and to get a Bugzilla API key.
 
