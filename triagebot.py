@@ -19,7 +19,7 @@ import time
 import traceback
 import yaml
 
-ISSUE_LINK = 'https://github.com/bgilbert/triagebot/issues'
+ISSUE_LINK = 'https://github.com/coreos/triagebot/issues'
 HELP = f'''
 I understand these commands:
 `unresolve` (in BZ thread) - unresolve the BZ

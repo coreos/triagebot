@@ -23,7 +23,7 @@ A `setup.cfg` would be nice, but we don't have one right now.
 
 ```sh
 cd ~
-git clone https://github.com/bgilbert/triagebot
+git clone https://github.com/coreos/triagebot
 cd triagebot
 virtualenv env
 env/bin/pip install -r requirements.txt
