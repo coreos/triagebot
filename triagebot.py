@@ -185,6 +185,8 @@ class Bug:
         for field in fields:
             setattr(self, field, getattr(details, field))
         self.assigned_to_name = details.assigned_to_detail['real_name']
+        if not self.assigned_to_name:
+            self.assigned_to_name = details.assigned_to_detail['email']
 
     def __str__(self):
         return f'[{self.bz}] {self.summary}'
