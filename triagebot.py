@@ -184,9 +184,9 @@ class Bug:
         details = bzapi.getbug(self.bz, include_fields=fields)
         for field in fields:
             setattr(self, field, getattr(details, field))
-        self.assigned_to_name = details.assigned_to_detail['real_name']
-        if not self.assigned_to_name:
-            self.assigned_to_name = details.assigned_to_detail['email']
+        self.assigned_to_display = details.assigned_to_detail['real_name']
+        if not self.assigned_to_display:
+            self.assigned_to_display = details.assigned_to_detail['email']
 
     def __str__(self):
         return f'[{self.bz}] {self.summary}'
@@ -248,7 +248,7 @@ class Bug:
             elif self.status == 'CLOSED':
                 status = f'Closed as *{escape(self.resolution)}*'
             else:
-                status = f'Assigned to *{escape(self.assigned_to_name)}*'
+                status = f'Assigned to *{escape(self.assigned_to_display)}*'
             blocks.append({
                 'type': 'context',
                 'elements': [
@@ -518,11 +518,11 @@ def process_event(config, socket_client, req):
                 return
             elif bug.assigned_to == config.bugzilla_assignee:
                 client.chat_postMessage(channel=payload.container.channel_id,
-                        text=f"<@{payload.user.id}> Bug still assigned to {escape(bug.assigned_to_name)}, cannot resolve.",
+                        text=f"<@{payload.user.id}> Bug still assigned to {escape(bug.assigned_to_display)}, cannot resolve.",
                         thread_ts=payload.container.message_ts)
                 return
             else:
-                status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to_name)}*.'
+                status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to_display)}*.'
             bug.resolve()
             bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
 
@@ -605,7 +605,7 @@ class Scheduler:
                         assert bug.resolved
                         bug.unresolve()
                         self._client.chat_postMessage(channel=bug.channel,
-                                text=f'_Bug now *{escape(bug.status)}* in *{escape(bug.component)}*, assigned to *{escape(bug.assigned_to_name)}*. Unresolving._',
+                                text=f'_Bug now *{escape(bug.status)}* in *{escape(bug.component)}*, assigned to *{escape(bug.assigned_to_display)}*. Unresolving._',
                                 thread_ts=bug.ts)
         with self._db:
             self._db.prune_events()
