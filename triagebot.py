@@ -24,6 +24,7 @@ HELP = f'''
 I understand these commands:
 `unresolve` (in BZ thread) - unresolve the BZ
 `refresh` (in BZ thread) - refresh the BZ description
+`cc-leads` (in BZ thread) - add configured team leads to bug (for recovering access to restricted bugs)
 `track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
 `report` - summarize unresolved bugs to the channel
 `ping` - check whether the bot is running properly
@@ -163,6 +164,7 @@ class Bug:
             ts=None):
         self._config = config
         self._client = client
+        self._bzapi = bzapi
         self._db = db
         self.bz = bz
         self.channel = channel or config.channel  # default for new bug
@@ -303,6 +305,18 @@ class Bug:
                 raise
         self._db.set_resolved(self.bz, False)
 
+    def cc_leads(self):
+        '''Add configured list of team leads to CC list.  This is useful for
+        recovering access to restricted bugs that can only be accessed by
+        the default assignee.  Return the accounts added.'''
+        leads = self._config.get('team_leads', [])
+        if not leads:
+            return []
+        self._bzapi.update_bugs(self.bz, self._bzapi.build_update(
+            cc_add=leads
+        ))
+        return leads
+
     def log(self, message):
         '''Post the specified message as a threaded reply to the bug.'''
         assert self.posted
@@ -425,6 +439,19 @@ def process_event(config, socket_client, req):
                 except KeyError:
                     fail_command("Couldn't find a BZ matching this thread.")
                 bug.update_message()
+                complete_command()
+            elif message == 'cc-leads':
+                if 'thread_ts' not in payload.event:
+                    fail_command('`cc-leads` command must be used in a thread.')
+                try:
+                    bug = make_bug(channel=payload.event.channel,
+                            ts=payload.event.thread_ts)
+                except KeyError:
+                    fail_command("Couldn't find a BZ matching this thread.")
+                leads = [f'`{escape(l)}`' for l in bug.cc_leads()]
+                if not leads:
+                    leads.append('no one')
+                bug.log(f'Added {", ".join(leads)} to CC list.')
                 complete_command()
             elif message.startswith('track '):
                 try:
