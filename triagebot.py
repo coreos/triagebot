@@ -28,6 +28,7 @@ I understand these commands:
 `track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
 `report` - summarize unresolved bugs to the channel
 `ping` - check whether the bot is running properly
+`refresh-all` - refresh all unresolved BZ descriptions
 `help` - print this message
 Report problems <{ISSUE_LINK}|here>.
 '''
@@ -439,6 +440,18 @@ def process_event(config, socket_client, req):
                 except KeyError:
                     fail_command("Couldn't find a BZ matching this thread.")
                 bug.update_message()
+                complete_command()
+            elif message == 'refresh-all':
+                client.reactions_add(channel=payload.event.channel,
+                        timestamp=payload.event.ts,
+                        name='hourglass_flowing_sand')
+                try:
+                    for bug in Bug.list_unresolved(config, client, bzapi, db):
+                        bug.update_message()
+                finally:
+                    client.reactions_remove(channel=payload.event.channel,
+                            timestamp=payload.event.ts,
+                            name='hourglass_flowing_sand')
                 complete_command()
             elif message == 'cc-leads':
                 if 'thread_ts' not in payload.event:
