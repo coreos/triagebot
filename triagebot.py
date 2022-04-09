@@ -5,6 +5,7 @@
 import argparse
 import bugzilla
 from croniter import croniter
+from datetime import datetime, timedelta, timezone
 from dotted_dict import DottedDict
 from functools import reduce, wraps
 from heapq import heappop, heappush
@@ -44,6 +45,10 @@ def escape(message):
     return reduce(lambda s, p: s.replace(p[0], p[1]), map.items(), message)
 
 
+def format_date(date):
+    return f'<!date^{int(date.timestamp())}^{{date_long}} {{time}}|{date.strftime("%Y-%m-%d %H:%MZ")}>'
+
+
 class Database:
     def __init__(self, config):
         # Use DB locking to protect against races between the Bugzilla
@@ -81,7 +86,14 @@ class Database:
             if ver < 5:
                 self._db.execute('create index bugs_resolved on bugs '
                         '(resolved)')
-                self._db.execute('pragma user_version = 5')
+            if ver < 6:
+                # may be null
+                self._db.execute('alter table bugs add column '
+                        'autoclose_unixtime integer')
+                # may be null
+                self._db.execute('alter table bugs add column '
+                        'autoclose_comment_count integer')
+                self._db.execute('pragma user_version = 6')
 
     def __enter__(self):
         '''Start a database transaction.'''
@@ -101,29 +113,43 @@ class Database:
                 'values (?, ?, ?)', (bz, channel, ts))
 
     def set_resolved(self, bz, resolved=True):
-        self._db.execute('update bugs set resolved = ? where bz == ?',
-                (int(resolved), bz))
+        # both resolve and unresolve disable autoclose
+        self._db.execute('update bugs set resolved = ?, '
+                'autoclose_unixtime = null, autoclose_comment_count = null '
+                'where bz == ?', (int(resolved), bz))
+
+    def set_autoclose(self, bz, time, comment_count):
+        self._db.execute('update bugs set resolved = 0, '
+                'autoclose_unixtime = ?, autoclose_comment_count = ? '
+                'where bz == ?', (int(time.timestamp()), comment_count, bz))
 
     def list_unresolved(self):
         res = self._db.execute('select bz from bugs where '
                 'resolved == 0 order by timestamp').fetchall()
         return [r[0] for r in res]
 
+    def list_autoclose(self):
+        res = self._db.execute('select bz from bugs where '
+                'autoclose_unixtime not null order by timestamp').fetchall()
+        return [r[0] for r in res]
+
     def lookup_bz(self, bz):
-        res = self._db.execute('select channel, timestamp, resolved '
+        res = self._db.execute('select channel, timestamp, resolved, '
+                'autoclose_unixtime, autoclose_comment_count '
                 'from bugs where bz == ?', (bz,)).fetchone()
         if res is None:
             raise KeyError
-        channel, ts, resolved = res
-        return channel, ts, bool(resolved)
+        channel, ts, resolved, close_time, close_comments = res
+        return channel, ts, bool(resolved), close_time, close_comments
 
     def lookup_ts(self, channel, ts):
-        res = self._db.execute('select bz, resolved from bugs where '
+        res = self._db.execute('select bz, resolved, autoclose_unixtime, '
+                'autoclose_comment_count from bugs where '
                 'channel == ? and timestamp == ?', (channel, ts)).fetchone()
         if res is None:
             raise KeyError
-        bz, resolved = res
-        return bz, bool(resolved)
+        bz, resolved, close_time, close_comments = res
+        return bz, bool(resolved), close_time, close_comments
 
     def set_special(self, name, channel, id):
         self._db.execute('insert or replace into specials '
@@ -171,25 +197,34 @@ class Bug:
         self.channel = channel or config.channel  # default for new bug
         self.ts = ts
         self.resolved = False  # default for new bug
+        self.autoclose_time = None  # default for new bug
+        self.autoclose_comment_count = None  # default for new bug
         if bz is not None:
             assert channel is None and ts is None
             try:
-                self.channel, self.ts, self.resolved = db.lookup_bz(bz)
+                (self.channel, self.ts, self.resolved, self.autoclose_time,
+                        self.autoclose_comment_count) = db.lookup_bz(bz)
             except KeyError:
                 # new bug hasn't been added yet
                 pass
         else:
             assert channel is not None and ts is not None
             # raises KeyError on unknown timestamp
-            self.bz, self.resolved = db.lookup_ts(channel, ts)
+            (self.bz, self.resolved, self.autoclose_time,
+                    self.autoclose_comment_count) = db.lookup_ts(channel, ts)
+        if self.autoclose_time is not None:
+            self.autoclose_time = datetime.fromtimestamp(self.autoclose_time,
+                    timezone.utc)
         fields = ['summary', 'product', 'component', 'assigned_to', 'status',
-                'resolution']
+                'resolution', 'flags']
         details = bzapi.getbug(self.bz, include_fields=fields)
         for field in fields:
             setattr(self, field, getattr(details, field))
         self.assigned_to_display = details.assigned_to_detail['real_name']
         if not self.assigned_to_display:
             self.assigned_to_display = details.assigned_to_detail['email']
+        self.needinfo = any(f['name'] == 'needinfo' and f['is_active']
+                for f in self.flags)
 
     def __str__(self):
         return f'[{self.bz}] {self.summary}'
@@ -201,7 +236,7 @@ class Bug:
         to process a BZ without constructing a Bug, since the latter makes
         an additional Bugzilla query.'''
         try:
-            _, _, resolved = db.lookup_bz(bz)
+            _, _, resolved, _, _ = db.lookup_bz(bz)
             return not resolved
         except KeyError:
             return False
@@ -211,14 +246,34 @@ class Bug:
         for bz in db.list_unresolved():
             yield cls(config, client, bzapi, db, bz=bz)
 
+    @classmethod
+    def list_autoclose(cls, config, client, bzapi, db):
+        for bz in db.list_autoclose():
+            yield cls(config, client, bzapi, db, bz=bz)
+
     @property
     def posted(self):
         '''True if this bug has been posted to Slack.'''
         return self.ts is not None
 
+    @property
+    def autoclose(self):
+        '''True if this bug has been configured to autoclose.'''
+        return self.autoclose_time is not None
+
+    def get_comment_count(self):
+        '''Get the number of comments, which is relatively expensive.'''
+        details = self._bzapi.getbug(self.bz, include_fields=['comments'])
+        return len(details.comments)
+
     def _make_message(self):
         '''Format the Slack message for a bug.'''
-        icon = ':white_check_mark:' if self.resolved else ':bugzilla:'
+        if self.resolved:
+            icon = ':white_check_mark:'
+        elif self.autoclose:
+            icon = ':timer_clock:'
+        else:
+            icon = ':bugzilla:'
         message = f'{icon} <{self._config.bugzilla_bug_url}{self.bz}|[{self.bz}] {escape(self.summary)}> :thread:'
         blocks = [
             {
@@ -229,22 +284,10 @@ class Bug:
                 }
             }
         ]
-        if not self.resolved:
-            blocks.append({
-                'type': 'actions',
-                'elements': [
-                    {
-                        'type': 'button',
-                        'text': {
-                            'type': 'plain_text',
-                            'text': 'Resolve'
-                        },
-                        'value': 'resolve',
-                    },
-                ]
-            })
-        else:
-            if self.product != self._config.bugzilla_product:
+        if self.resolved or self.autoclose:
+            if self.autoclose:
+                status = f'Will close after *{format_date(self.autoclose_time)}*'
+            elif self.product != self._config.bugzilla_product:
                 status = f'Moved to *{escape(self.product)}*/*{escape(self.component)}*'
             elif self.component != self._config.bugzilla_component:
                 status = f'Moved to *{escape(self.component)}*'
@@ -261,6 +304,28 @@ class Bug:
                     },
                 ]
             })
+        if not self.resolved:
+            actions = {
+                'type': 'actions',
+                'elements': [{
+                    'type': 'button',
+                    'text': {
+                        'type': 'plain_text',
+                        'text': 'Resolve'
+                    },
+                    'value': 'resolve',
+                }]
+            }
+            if not self.autoclose:
+                actions['elements'].append({
+                    'type': 'button',
+                    'text': {
+                        'type': 'plain_text',
+                        'text': 'Time out'
+                    },
+                    'value': 'autoclose',
+                })
+            blocks.append(actions)
         return message, blocks
 
     def post(self):
@@ -280,11 +345,70 @@ class Bug:
         self._client.chat_update(channel=self.channel, ts=self.ts,
                 text=message, blocks=blocks)
 
+    def check_can_autoclose(self):
+        '''Check the bug against the autoclose rules, and return None if okay
+        to autoclose or else a reason string.'''
+        if self.status != 'NEW':
+            return f'status is *{self.status}*'
+        elif self.assigned_to != self._config.bugzilla_assignee:
+            return f'assignee is *{escape(self.assigned_to_display)}*'
+        elif self.product != self._config.bugzilla_product:
+            return f'product is *{escape(self.product)}*'
+        elif self.component != self._config.bugzilla_component:
+            return f'component is *{escape(self.component)}*'
+        elif not self.needinfo:
+            return 'does not have needinfo set'
+        else:
+            return None
+
+    def set_autoclose(self):
+        '''Mark the bug for autoclose in autoclose-minutes minutes and record
+        in DB.'''
+        assert self.posted
+        self.resolved = False
+        time = (datetime.now(timezone.utc) +
+                timedelta(minutes=self._config.get('autoclose_minutes', 20160)))
+        # round down to minute
+        self.autoclose_time = (time -
+                timedelta(seconds=time.second, microseconds=time.microsecond))
+        self.autoclose_comment_count = self.get_comment_count()
+        self.update_message()
+        try:
+            self._client.pins_add(channel=self.channel, timestamp=self.ts)
+        except SlackApiError as e:
+            if e.response['error'] != 'already_pinned':
+                raise
+        self._db.set_autoclose(self.bz, self.autoclose_time,
+                self.autoclose_comment_count)
+
+    def refresh_autoclose(self):
+        '''Perform or disable autoclose if needed.'''
+        if not self.autoclose:
+            return
+        fail_reason = self.check_can_autoclose()
+        if fail_reason is not None:
+            self.log(f'_Bug {fail_reason}, disabling autoclose._')
+            self.unresolve()
+        elif self.autoclose_comment_count != self.get_comment_count():
+            self.log('_Comment added to bug, disabling autoclose._')
+            self.unresolve()
+        elif self.autoclose_time < datetime.now(timezone.utc):
+            self._bzapi.update_bugs([self.bz], self._bzapi.build_update(
+                status='CLOSED',
+                resolution='INSUFFICIENT_DATA',
+                comment="We are unable to make progress on this bug without the requested information, so the bug is now being closed. If the problem persists, please provide the requested information and reopen the bug.",
+            ))
+            self.log('_Bug timeout reached, closing as INSUFFICIENT_DATA._')
+            self.status = 'CLOSED'
+            self.resolution = 'INSUFFICIENT_DATA'
+            self.resolve()
+
     def resolve(self):
         '''Mark the bug resolved and record in DB.  Safe to call if already
         resolved.'''
         assert self.posted
         self.resolved = True
+        self.autoclose_time, self.autoclose_comment_count = (None, None)
         self.update_message()
         try:
             self._client.pins_remove(channel=self.channel, timestamp=self.ts)
@@ -298,6 +422,7 @@ class Bug:
         already unresolved.'''
         assert self.posted
         self.resolved = False
+        self.autoclose_time, self.autoclose_comment_count = (None, None)
         self.update_message()
         try:
             self._client.pins_add(channel=self.channel, timestamp=self.ts)
@@ -333,7 +458,8 @@ def post_report(config, client, bzapi, db):
         age_days = int((time.time() - float(bug.ts)) / 86400)
         link = client.chat_getPermalink(channel=bug.channel,
                 message_ts=bug.ts)["permalink"]
-        part = f':bugzilla: <{config.bugzilla_bug_url}{bug.bz}|[{bug.bz}]> <{link}|{escape(bug.summary)}> ({age_days} days)'
+        icon = ':timer_clock:' if bug.autoclose else ':bugzilla:'
+        part = f'{icon} <{config.bugzilla_bug_url}{bug.bz}|[{bug.bz}]> <{link}|{escape(bug.summary)}> ({age_days} days)'
         parts.append(part)
     if not parts:
         parts.append('_No bugs!_')
@@ -525,7 +651,8 @@ def process_event(config, socket_client, req):
                 raise Exception(f'Throwing exception as requested by <@{payload.event.user}>')
             else:
                 fail_command(f"I didn't understand that.  Try `<@{config.bot_id}> help`")
-        elif req.type == 'interactive' and payload.type == 'block_actions' and payload.actions[0].value == 'resolve':
+        elif (req.type == 'interactive' and payload.type == 'block_actions' and
+                payload.actions[0].value in ('resolve', 'autoclose')):
             if payload.container.channel_id != config.channel:
                 # Don't even acknowledge events outside our channel, to
                 # avoid interfering with separate instances in other
@@ -545,26 +672,36 @@ def process_event(config, socket_client, req):
                         text=f"<@{payload.user.id}> Couldn't find a record of this bug.",
                         thread_ts=payload.container.message_ts)
                 return
-            if bug.product != config.bugzilla_product:
-                status = f'Bug now in *{escape(bug.product)}*/*{escape(bug.component)}*.'
-            elif bug.component != config.bugzilla_component:
-                status = f'Bug now in *{escape(bug.component)}*.'
-            elif bug.status == 'CLOSED':
-                status = f'Bug now *CLOSED/{escape(bug.resolution)}*.'
-            elif bug.status == 'NEW':
-                client.chat_postMessage(channel=payload.container.channel_id,
-                        text=f"<@{payload.user.id}> Bug still in component {escape(config.bugzilla_component)} and status NEW, cannot resolve.",
-                        thread_ts=payload.container.message_ts)
-                return
-            elif bug.assigned_to == config.bugzilla_assignee:
-                client.chat_postMessage(channel=payload.container.channel_id,
-                        text=f"<@{payload.user.id}> Bug still assigned to {escape(bug.assigned_to_display)}, cannot resolve.",
-                        thread_ts=payload.container.message_ts)
-                return
-            else:
-                status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to_display)}*.'
-            bug.resolve()
-            bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
+            if payload.actions[0].value == 'resolve':
+                if bug.product != config.bugzilla_product:
+                    status = f'Bug now in *{escape(bug.product)}*/*{escape(bug.component)}*.'
+                elif bug.component != config.bugzilla_component:
+                    status = f'Bug now in *{escape(bug.component)}*.'
+                elif bug.status == 'CLOSED':
+                    status = f'Bug now *CLOSED/{escape(bug.resolution)}*.'
+                elif bug.status == 'NEW':
+                    client.chat_postMessage(channel=payload.container.channel_id,
+                            text=f"<@{payload.user.id}> Bug still in component {escape(config.bugzilla_component)} and status NEW, cannot resolve.",
+                            thread_ts=payload.container.message_ts)
+                    return
+                elif bug.assigned_to == config.bugzilla_assignee:
+                    client.chat_postMessage(channel=payload.container.channel_id,
+                            text=f"<@{payload.user.id}> Bug still assigned to {escape(bug.assigned_to_display)}, cannot resolve.",
+                            thread_ts=payload.container.message_ts)
+                    return
+                else:
+                    status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to_display)}*.'
+                bug.resolve()
+                bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
+            elif payload.actions[0].value == 'autoclose':
+                fail_reason = bug.check_can_autoclose()
+                if fail_reason is not None:
+                    client.chat_postMessage(channel=payload.container.channel_id,
+                            text=f"<@{payload.user.id}> Bug {fail_reason}, cannot autoclose.",
+                            thread_ts=payload.container.message_ts)
+                    return
+                bug.set_autoclose()
+                bug.log(f'_Will close unless a bug comment is added by *{format_date(bug.autoclose_time)}*, as requested by <@{payload.user.id}>. Disable with_ `<@{config.bot_id}> unresolve`')
 
 
 class Scheduler:
@@ -647,6 +784,12 @@ class Scheduler:
                         self._client.chat_postMessage(channel=bug.channel,
                                 text=f'_Bug now *{escape(bug.status)}* in *{escape(bug.component)}*, assigned to *{escape(bug.assigned_to_display)}*. Unresolving._',
                                 thread_ts=bug.ts)
+
+        with self._db:
+            for bug in Bug.list_autoclose(self._config, self._client,
+                    self._bzapi, self._db):
+                bug.refresh_autoclose()
+
         with self._db:
             self._db.prune_events()
             self._update_watchdog()
