@@ -1,4 +1,4 @@
-FROM registry.fedoraproject.org/fedora:35
+FROM registry.fedoraproject.org/fedora:36
 RUN dnf install -y python3-pip sqlite && dnf clean all
 COPY requirements.txt /
 RUN pip install -r /requirements.txt
