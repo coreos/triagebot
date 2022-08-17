@@ -15,9 +15,6 @@ watchdog-minutes: 30
 report-schedule: "0 9 * * 1"
 # Manually-invoked bug close timeout in minutes
 autoclose-minutes: 20160
-# Bugzilla accounts to be added to a bug by the cc-leads command.  Optional.
-team-leads:
-  - bovik@example.com
 
 # Hostname of the Bugzilla server
 bugzilla: bugzilla.redhat.com
