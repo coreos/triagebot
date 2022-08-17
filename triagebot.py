@@ -23,12 +23,12 @@ import yaml
 ISSUE_LINK = 'https://github.com/coreos/triagebot/issues'
 HELP = f'''
 I understand these commands:
-`unresolve` (in BZ thread) - unresolve the BZ
-`refresh` (in BZ thread) - refresh the BZ description
-`track {{BZ-URL|BZ-number}}` - start tracking the specified BZ
-`report` - summarize unresolved bugs to the channel
+`unresolve` (in issue thread) - unresolve the issue
+`refresh` (in issue thread) - refresh the issue description
+`track {{issue-URL|issue-key}}` - start tracking the specified issue
+`report` - summarize unresolved issues to the channel
 `ping` - check whether the bot is running properly
-`refresh-all` - refresh all unresolved BZ descriptions
+`refresh-all` - refresh all unresolved issue descriptions
 `help` - print this message
 Report problems <{ISSUE_LINK}|here>.
 '''
@@ -50,7 +50,7 @@ def format_date(date):
 
 class Database:
     def __init__(self, config):
-        # Use DB locking to protect against races between the Bugzilla
+        # Use DB locking to protect against races between the Jira
         # polling thread and the track command, and to avoid SQLITE_BUSY on
         # lock upgrade.  We're not performance-critical.
         self._db = sqlite3.connect(config.database, isolation_level='immediate',
@@ -107,7 +107,7 @@ class Database:
             return False
         return self._db.__exit__(exc_type, exc_value, tb)
 
-    def add_bug(self, bz, channel, ts):
+    def add_issue(self, bz, channel, ts):
         self._db.execute('insert into bugs (bz, channel, timestamp) '
                 'values (?, ?, ?)', (bz, channel, ts))
 
@@ -183,7 +183,7 @@ class Database:
                 (int(time.time() - max_age),))
 
 
-class Bug:
+class Issue:
     # Database transactions must be supplied by the caller.
 
     def __init__(self, config, client, bzapi, db, bz=None, channel=None,
@@ -193,18 +193,18 @@ class Bug:
         self._bzapi = bzapi
         self._db = db
         self.bz = bz
-        self.channel = channel or config.channel  # default for new bug
+        self.channel = channel or config.channel  # default for new issue
         self.ts = ts
-        self.resolved = False  # default for new bug
-        self.autoclose_time = None  # default for new bug
-        self.autoclose_comment_count = None  # default for new bug
+        self.resolved = False  # default for new issue
+        self.autoclose_time = None  # default for new issue
+        self.autoclose_comment_count = None  # default for new issue
         if bz is not None:
             assert channel is None and ts is None
             try:
                 (self.channel, self.ts, self.resolved, self.autoclose_time,
                         self.autoclose_comment_count) = db.lookup_bz(bz)
             except KeyError:
-                # new bug hasn't been added yet
+                # new issue hasn't been added yet
                 pass
         else:
             assert channel is not None and ts is not None
@@ -230,10 +230,10 @@ class Bug:
 
     @staticmethod
     def is_unresolved(db, bz):
-        '''Class method returning True if the specified BZ is posted and
-        unresolved.  This allows the Bugzilla polling loop to check whether
-        to process a BZ without constructing a Bug, since the latter makes
-        an additional Bugzilla query.'''
+        '''Class method returning True if the specified issue is posted and
+        unresolved.  This allows the Jira polling loop to check whether
+        to process an issue without constructing an Issue, since the latter
+        makes an additional Jira query.'''
         try:
             _, _, resolved, _, _ = db.lookup_bz(bz)
             return not resolved
@@ -252,12 +252,12 @@ class Bug:
 
     @property
     def posted(self):
-        '''True if this bug has been posted to Slack.'''
+        '''True if this issue has been posted to Slack.'''
         return self.ts is not None
 
     @property
     def autoclose(self):
-        '''True if this bug has been configured to autoclose.'''
+        '''True if this issue has been configured to autoclose.'''
         return self.autoclose_time is not None
 
     def get_comment_count(self):
@@ -266,7 +266,7 @@ class Bug:
         return len(details.comments)
 
     def _make_message(self):
-        '''Format the Slack message for a bug.'''
+        '''Format the Slack message for an issue.'''
         if self.resolved:
             icon = ':white_check_mark:'
         elif self.autoclose:
@@ -328,24 +328,24 @@ class Bug:
         return message, blocks
 
     def post(self):
-        '''Post this bug to Slack and record in DB.'''
+        '''Post this issue to Slack and record in DB.'''
         assert not self.posted
         message, blocks = self._make_message()
         self.ts = self._client.chat_postMessage(channel=self.channel,
                 text=message, blocks=blocks, unfurl_links=False,
                 unfurl_media=False)['ts']
         self._client.pins_add(channel=self.channel, timestamp=self.ts)
-        self._db.add_bug(self.bz, self.channel, self.ts)
+        self._db.add_issue(self.bz, self.channel, self.ts)
 
     def update_message(self):
-        '''Rerender the existing Slack message for this bug.'''
+        '''Rerender the existing Slack message for this issue.'''
         assert self.posted
         message, blocks = self._make_message()
         self._client.chat_update(channel=self.channel, ts=self.ts,
                 text=message, blocks=blocks)
 
     def check_can_autoclose(self):
-        '''Check the bug against the autoclose rules, and return None if okay
+        '''Check the issue against the autoclose rules, and return None if okay
         to autoclose or else a reason string.'''
         if self.status != 'NEW':
             return f'status is *{self.status}*'
@@ -361,7 +361,7 @@ class Bug:
             return None
 
     def set_autoclose(self):
-        '''Mark the bug for autoclose in autoclose-minutes minutes and record
+        '''Mark the issue for autoclose in autoclose-minutes minutes and record
         in DB.'''
         assert self.posted
         self.resolved = False
@@ -386,24 +386,24 @@ class Bug:
             return
         fail_reason = self.check_can_autoclose()
         if fail_reason is not None:
-            self.log(f'_Bug {fail_reason}, disabling autoclose._')
+            self.log(f'_Issue {fail_reason}, disabling autoclose._')
             self.unresolve()
         elif self.autoclose_comment_count != self.get_comment_count():
-            self.log('_Comment added to bug, disabling autoclose._')
+            self.log('_Comment added to issue, disabling autoclose._')
             self.unresolve()
         elif self.autoclose_time < datetime.now(timezone.utc):
             self._bzapi.update_bugs([self.bz], self._bzapi.build_update(
                 status='CLOSED',
                 resolution='INSUFFICIENT_DATA',
-                comment="We are unable to make progress on this bug without the requested information, so the bug is now being closed. If the problem persists, please provide the requested information and reopen the bug.",
+                comment="We are unable to make progress on this issue without the requested information, so the issue is now being closed. If the problem persists, please provide the requested information and reopen the issue.",
             ))
-            self.log('_Bug timeout reached, closing as INSUFFICIENT_DATA._')
+            self.log('_Issue timeout reached, closing as INSUFFICIENT_DATA._')
             self.status = 'CLOSED'
             self.resolution = 'INSUFFICIENT_DATA'
             self.resolve()
 
     def resolve(self):
-        '''Mark the bug resolved and record in DB.  Safe to call if already
+        '''Mark the issue resolved and record in DB.  Safe to call if already
         resolved.'''
         assert self.posted
         self.resolved = True
@@ -417,7 +417,7 @@ class Bug:
         self._db.set_resolved(self.bz)
 
     def unresolve(self):
-        '''Mark the bug unresolved and record in DB.  Safe to call if
+        '''Mark the issue unresolved and record in DB.  Safe to call if
         already unresolved.'''
         assert self.posted
         self.resolved = False
@@ -431,26 +431,26 @@ class Bug:
         self._db.set_resolved(self.bz, False)
 
     def log(self, message):
-        '''Post the specified message as a threaded reply to the bug.'''
+        '''Post the specified message as a threaded reply to the issue.'''
         assert self.posted
         self._client.chat_postMessage(channel=self.channel, text=message,
                 thread_ts=self.ts)
 
 
 def post_report(config, client, bzapi, db):
-    '''Post a summary of unresolved bugs to the channel.  Return the channel
+    '''Post a summary of unresolved issues to the channel.  Return the channel
     and timestamp.'''
     parts = []
-    for bug in Bug.list_unresolved(config, client, bzapi, db):
-        age_days = int((time.time() - float(bug.ts)) / 86400)
-        link = client.chat_getPermalink(channel=bug.channel,
-                message_ts=bug.ts)["permalink"]
-        icon = ':timer_clock:' if bug.autoclose else ':bugzilla:'
-        part = f'{icon} <{config.bugzilla_bug_url}{bug.bz}|[{bug.bz}]> <{link}|{escape(bug.summary)}> ({age_days} days)'
+    for issue in Issue.list_unresolved(config, client, bzapi, db):
+        age_days = int((time.time() - float(issue.ts)) / 86400)
+        link = client.chat_getPermalink(channel=issue.channel,
+                message_ts=issue.ts)["permalink"]
+        icon = ':timer_clock:' if issue.autoclose else ':bugzilla:'
+        part = f'{icon} <{config.bugzilla_bug_url}{issue.bz}|[{issue.bz}]> <{link}|{escape(issue.summary)}> ({age_days} days)'
         parts.append(part)
     if not parts:
-        parts.append('_No bugs!_')
-    message = '\n'.join(['*Unresolved bug summary:*'] + parts)
+        parts.append('_No issues!_')
+    message = '\n'.join(['*Unresolved issue summary:*'] + parts)
     ts = client.chat_postMessage(channel=config.channel,
             text=message, unfurl_links=False, unfurl_media=False)['ts']
     return config.channel, ts
@@ -500,8 +500,8 @@ def process_event(config, socket_client, req):
     bzapi = bugzilla.Bugzilla(config.bugzilla, api_key=config.bugzilla_key,
             force_rest=True)
 
-    def make_bug(**kwargs):
-        return Bug(config, client, bzapi, db, **kwargs)
+    def make_issue(**kwargs):
+        return Issue(config, client, bzapi, db, **kwargs)
 
     def ack_event():
         '''Acknowledge the event, as required by Slack.'''
@@ -538,29 +538,29 @@ def process_event(config, socket_client, req):
                 if 'thread_ts' not in payload.event:
                     fail_command('`unresolve` command must be used in a thread.')
                 try:
-                    bug = make_bug(channel=payload.event.channel,
+                    issue = make_issue(channel=payload.event.channel,
                             ts=payload.event.thread_ts)
                 except KeyError:
-                    fail_command("Couldn't find a BZ matching this thread.")
-                bug.unresolve()
+                    fail_command("Couldn't find an issue matching this thread.")
+                issue.unresolve()
                 complete_command()
             elif message == 'refresh':
                 if 'thread_ts' not in payload.event:
                     fail_command('`refresh` command must be used in a thread.')
                 try:
-                    bug = make_bug(channel=payload.event.channel,
+                    issue = make_issue(channel=payload.event.channel,
                             ts=payload.event.thread_ts)
                 except KeyError:
-                    fail_command("Couldn't find a BZ matching this thread.")
-                bug.update_message()
+                    fail_command("Couldn't find an issue matching this thread.")
+                issue.update_message()
                 complete_command()
             elif message == 'refresh-all':
                 client.reactions_add(channel=payload.event.channel,
                         timestamp=payload.event.ts,
                         name='hourglass_flowing_sand')
                 try:
-                    for bug in Bug.list_unresolved(config, client, bzapi, db):
-                        bug.update_message()
+                    for issue in Issue.list_unresolved(config, client, bzapi, db):
+                        issue.update_message()
                 finally:
                     client.reactions_remove(channel=payload.event.channel,
                             timestamp=payload.event.ts,
@@ -568,25 +568,25 @@ def process_event(config, socket_client, req):
                 complete_command()
             elif message.startswith('track '):
                 try:
-                    # Accept a bug number or a BZ URL with optional anchor.
+                    # Accept an issue key or an issue URL with optional anchor.
                     # Slack puts URLs inside <>.
                     bz = int(message.replace('track ', '', 1). \
                             replace(config.bugzilla_bug_url, '', 1). \
                             split('#')[0]. \
                             strip(' <>'))
                 except ValueError:
-                    fail_command("Invalid bug number.")
-                bug = make_bug(bz=bz)
-                if bug.posted:
-                    link = client.chat_getPermalink(channel=bug.channel,
-                            message_ts=bug.ts)["permalink"]
-                    fail_command(f"Bug {bz} <{link}|already tracked>.")
-                bug.post()
-                bug.log(f'_Requested by <@{payload.event.user}>._')
+                    fail_command("Invalid issue key.")
+                issue = make_issue(bz=bz)
+                if issue.posted:
+                    link = client.chat_getPermalink(channel=issue.channel,
+                            message_ts=issue.ts)["permalink"]
+                    fail_command(f"Issue {bz} <{link}|already tracked>.")
+                issue.post()
+                issue.log(f'_Requested by <@{payload.event.user}>._')
                 complete_command()
             elif message == 'report':
                 # Post unscheduled report to the channel
-                # We make a potentially large number of BZ queries; tell
+                # We make a potentially large number of issue queries; tell
                 # the user we're working
                 client.reactions_add(channel=payload.event.channel,
                         timestamp=payload.event.ts,
@@ -599,21 +599,21 @@ def process_event(config, socket_client, req):
                             name='hourglass_flowing_sand')
                 complete_command()
             elif message == 'ping':
-                # Check Bugzilla connectivity
+                # Check Jira connectivity
                 try:
                     if not bzapi.logged_in:
                         raise Exception('Not logged in.')
                 except Exception:
                     # Swallow exception details and just report the failure
-                    fail_command('Cannot contact Bugzilla.')
+                    fail_command('Cannot contact Jira.')
                 # Check time since last successful poll
                 try:
                     last_check = db.get_special_unixtime('watchdog')
                 except KeyError:
-                    fail_command('Have never successfully polled Bugzilla.')
+                    fail_command('Have never successfully polled Jira.')
                 time_since_check = time.time() - last_check
                 if time_since_check > 1.5 * config.bugzilla_poll_interval:
-                    fail_command(f'Last successful Bugzilla poll was {int(time_since_check / 60)} minutes ago.')
+                    fail_command(f'Last successful Jira poll was {int(time_since_check / 60)} minutes ago.')
                 complete_command()
             elif message == 'help':
                 client.chat_postMessage(channel=payload.event.channel, text=HELP,
@@ -639,43 +639,43 @@ def process_event(config, socket_client, req):
                 # infrastructure anyway.
                 return
             try:
-                bug = make_bug(channel=payload.container.channel_id,
+                issue = make_issue(channel=payload.container.channel_id,
                         ts=payload.container.message_ts)
             except KeyError:
                 client.chat_postMessage(channel=payload.container.channel_id,
-                        text=f"<@{payload.user.id}> Couldn't find a record of this bug.",
+                        text=f"<@{payload.user.id}> Couldn't find a record of this issue.",
                         thread_ts=payload.container.message_ts)
                 return
             if payload.actions[0].value == 'resolve':
-                if bug.product != config.bugzilla_product:
-                    status = f'Bug now in *{escape(bug.product)}*/*{escape(bug.component)}*.'
-                elif bug.component != config.bugzilla_component:
-                    status = f'Bug now in *{escape(bug.component)}*.'
-                elif bug.status == 'CLOSED':
-                    status = f'Bug now *CLOSED/{escape(bug.resolution)}*.'
-                elif bug.status == 'NEW':
+                if issue.product != config.bugzilla_product:
+                    status = f'Issue now in *{escape(issue.product)}*/*{escape(issue.component)}*.'
+                elif issue.component != config.bugzilla_component:
+                    status = f'Issue now in *{escape(issue.component)}*.'
+                elif issue.status == 'CLOSED':
+                    status = f'Issue now *CLOSED/{escape(issue.resolution)}*.'
+                elif issue.status == 'NEW':
                     client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Bug still in component {escape(config.bugzilla_component)} and status NEW, cannot resolve.",
+                            text=f"<@{payload.user.id}> Issue still in component {escape(config.bugzilla_component)} and status NEW, cannot resolve.",
                             thread_ts=payload.container.message_ts)
                     return
-                elif bug.assigned_to == config.bugzilla_assignee:
+                elif issue.assigned_to == config.bugzilla_assignee:
                     client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Bug still assigned to {escape(bug.assigned_to_display)}, cannot resolve.",
+                            text=f"<@{payload.user.id}> Issue still assigned to {escape(issue.assigned_to_display)}, cannot resolve.",
                             thread_ts=payload.container.message_ts)
                     return
                 else:
-                    status = f'Bug now *{escape(bug.status)}*, assigned to *{escape(bug.assigned_to_display)}*.'
-                bug.resolve()
-                bug.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
+                    status = f'Issue now *{escape(issue.status)}*, assigned to *{escape(issue.assigned_to_display)}*.'
+                issue.resolve()
+                issue.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
             elif payload.actions[0].value == 'autoclose':
-                fail_reason = bug.check_can_autoclose()
+                fail_reason = issue.check_can_autoclose()
                 if fail_reason is not None:
                     client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Bug {fail_reason}, cannot autoclose.",
+                            text=f"<@{payload.user.id}> Issue {fail_reason}, cannot autoclose.",
                             thread_ts=payload.container.message_ts)
                     return
-                bug.set_autoclose()
-                bug.log(f'_Will close unless a bug comment is added by *{format_date(bug.autoclose_time)}*, as requested by <@{payload.user.id}>. Disable with_ `<@{config.bot_id}> unresolve`')
+                issue.set_autoclose()
+                issue.log(f'_Will close unless an issue comment is added by *{format_date(issue.autoclose_time)}*, as requested by <@{payload.user.id}>. Disable with_ `<@{config.bot_id}> unresolve`')
 
 
 class Scheduler:
@@ -727,10 +727,10 @@ class Scheduler:
 
     def _check_bugzilla(self, _config):
         queries = [
-            # NEW bugs
+            # NEW issues
             self._bzapi.build_query(product=self._config.bugzilla_product,
                     component=self._config.bugzilla_component, status='NEW'),
-            # Open bugs assigned to default assignee
+            # Open issues assigned to default assignee
             self._bzapi.build_query(product=self._config.bugzilla_product,
                     component=self._config.bugzilla_component,
                     status='__open__',
@@ -740,29 +740,29 @@ class Scheduler:
         for query in queries:
             query['include_fields'] = ['id']
             bzs.update(bz.id for bz in self._bzapi.query(query))
-        # Remove ignored bugs
+        # Remove ignored issues
         bzs.difference_update(self._config.get('bugzilla_ignore_bugs', []))
 
         for bz in sorted(bzs):
             with self._db:
-                if not Bug.is_unresolved(self._db, bz):
-                    bug = Bug(self._config, self._client, self._bzapi,
+                if not Issue.is_unresolved(self._db, bz):
+                    issue = Issue(self._config, self._client, self._bzapi,
                             self._db, bz=bz)
-                    if not bug.posted:
-                        # Unknown bug; post it
-                        bug.post()
+                    if not issue.posted:
+                        # Unknown issue; post it
+                        issue.post()
                     else:
-                        # Resolved bug; unresolve it
-                        assert bug.resolved
-                        bug.unresolve()
-                        self._client.chat_postMessage(channel=bug.channel,
-                                text=f'_Bug now *{escape(bug.status)}* in *{escape(bug.component)}*, assigned to *{escape(bug.assigned_to_display)}*. Unresolving._',
-                                thread_ts=bug.ts)
+                        # Resolved issue; unresolve it
+                        assert issue.resolved
+                        issue.unresolve()
+                        self._client.chat_postMessage(channel=issue.channel,
+                                text=f'_Issue now *{escape(issue.status)}* in *{escape(issue.component)}*, assigned to *{escape(issue.assigned_to_display)}*. Unresolving._',
+                                thread_ts=issue.ts)
 
         with self._db:
-            for bug in Bug.list_autoclose(self._config, self._client,
+            for issue in Issue.list_autoclose(self._config, self._client,
                     self._bzapi, self._db):
-                bug.refresh_autoclose()
+                issue.refresh_autoclose()
 
         with self._db:
             self._db.prune_events()
@@ -772,7 +772,7 @@ class Scheduler:
         '''Reschedule the message-in-a-bottle that warns of a bot failure.'''
         # First, add new message
         expiration = int(time.time() + 60 * self._config.watchdog_minutes)
-        message = f":robot_face: If you're seeing this, I haven't completed a Bugzilla check in {self._config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead, or Bugzilla may be down."
+        message = f":robot_face: If you're seeing this, I haven't completed a Jira check in {self._config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead, or Jira may be down."
         new_id = self._client.chat_scheduleMessage(channel=self._config.channel,
                 post_at=expiration, text=message)['scheduled_message_id']
         # Then delete the old one
@@ -806,7 +806,7 @@ class Scheduler:
 
 def main():
     parser = argparse.ArgumentParser(
-            description='Simple Bugzilla triage helper bot for Slack.')
+            description='Jira triage helper bot for Slack.')
     parser.add_argument('-c', '--config', metavar='FILE',
             default='~/.triagebot', help='config file')
     parser.add_argument('-d', '--database', metavar='FILE',
