@@ -62,37 +62,29 @@ class Database:
                         '(bz integer unique not null, '
                         'channel text not null, '
                         'timestamp text not null, '
-                        'resolved integer not null default 0)')
+                        'resolved integer not null default 0, '
+                        # may be null
+                        'autoclose_unixtime integer, '
+                        # may be null
+                        'autoclose_comment_count integer)')
                 self._db.execute('create unique index bugs_messages on bugs '
                         '(channel, timestamp)')
-            if ver < 2:
                 self._db.execute('create table specials '
                         '(name text unique not null, '
                         'channel text not null, '
-                        'id text not null)')
+                        'id text not null, '
+                        'unixtime integer not null)')
                 self._db.execute('create unique index specials_messages '
                         'on specials (channel, id)')
-            if ver < 3:
                 self._db.execute('create table events '
                         '(added integer not null, '
                         'channel text not null, '
                         'timestamp text not null)')
                 self._db.execute('create unique index events_unique '
                         'on events (channel, timestamp)')
-            if ver < 4:
-                self._db.execute('alter table specials add column '
-                        'unixtime integer not null default 0')
-            if ver < 5:
                 self._db.execute('create index bugs_resolved on bugs '
                         '(resolved)')
-            if ver < 6:
-                # may be null
-                self._db.execute('alter table bugs add column '
-                        'autoclose_unixtime integer')
-                # may be null
-                self._db.execute('alter table bugs add column '
-                        'autoclose_comment_count integer')
-                self._db.execute('pragma user_version = 6')
+                self._db.execute('pragma user_version = 1')
 
     def __enter__(self):
         '''Start a database transaction.'''
