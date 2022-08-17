@@ -740,8 +740,6 @@ class Scheduler:
         for query in queries:
             query['include_fields'] = ['id']
             bzs.update(bz.id for bz in self._bzapi.query(query))
-        # Remove ignored issues
-        bzs.difference_update(self._config.get('bugzilla_ignore_bugs', []))
 
         for bz in sorted(bzs):
             with self._db:

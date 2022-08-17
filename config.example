@@ -31,5 +31,3 @@ bugzilla-component: RHCOS
 bugzilla-assignee: bovik@example.com
 # Bugzilla polling interval in seconds
 bugzilla-poll-interval: 300
-# List of bug numbers to ignore
-bugzilla-ignore-bugs: []
