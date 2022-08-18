@@ -16,18 +16,18 @@ report-schedule: "0 9 * * 1"
 # Manually-invoked bug close timeout in minutes
 autoclose-minutes: 20160
 
-# Hostname of the Bugzilla server
-bugzilla: bugzilla.redhat.com
+# URL of the Jira server
+jira: https://issues.redhat.com/
 # Prefix of user-friendly bug URL
-bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
-# Bugzilla API key
-# (if not specified in TRIAGEBOT_BUGZILLA_KEY env var)
-bugzilla-key: xxx
-# Product containing the bugzilla-component
-bugzilla-product: OpenShift Container Platform
-# Component to scan for NEW bugs and open bugs assigned to default assignee
-bugzilla-component: RHCOS
+jira-issue-url: https://issues.redhat.com/browse/
+# Jira personal access token
+# (if not specified in TRIAGEBOT_JIRA_TOKEN env var)
+jira-token: xxx
+# Project key containing the jira-component
+jira-project-key: OCPBUGS
+# Component to scan for New bugs and open bugs assigned to default assignee
+jira-component: RHCOS
 # Default assignee for component
-bugzilla-assignee: bovik@example.com
-# Bugzilla polling interval in seconds
-bugzilla-poll-interval: 300
+jira-assignee-key: bovik
+# Jira polling interval in seconds
+jira-poll-interval: 300

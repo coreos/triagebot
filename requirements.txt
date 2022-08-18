@@ -1,7 +1,5 @@
-# cache 20220121
 croniter
 dotted-dict
-python-bugzilla
+jira
 PyYAML
-requests
 slack_sdk

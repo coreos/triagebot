@@ -1,21 +1,21 @@
 # Triagebot
 
-This is a simple Slack bot to help with triaging Bugzilla issues.  It reports new bugs to a designated Slack channel and tracks whether the bugs have been triaged.
+This is a simple Slack bot to help with triaging Jira issues.  It reports new issues to a designated Slack channel and tracks whether the issues have been triaged.
 
 ## Flows
 
-- NEW bug arrives on the configured Bugzilla product and component →
+- New issue arrives on the configured Jira project and component →
   send message to channel and pin it to the channel
-- Open bug arrives on the configured Bugzilla product and component, assigned to default assignee →
-  same behavior as NEW bug
-- "Resolve" button clicked on a bug message →
-  unpin message from channel, update message to show that the bug is resolved, log resolution as threaded reply
-- Bot mentioned in `unresolve` message in bug thread →
-  repin message to channel, update message to show that the bug is unresolved
-- Resolved bug is moved to NEW or to any open state with the default assignee, in the configured component →
-  same behavior as `unresolve` message; also send threaded reply noting the change in bug status
+- Open issue arrives on the configured component, assigned to default assignee →
+  same behavior as New issue
+- "Resolve" button clicked on a issue message →
+  unpin message from channel, update message to show that the issue is resolved, log resolution as threaded reply
+- Bot mentioned in `unresolve` message in issue thread →
+  repin message to channel, update message to show that the issue is unresolved
+- Resolved issue is moved to New or to any open state with the default assignee, in the configured component →
+  same behavior as `unresolve` message; also send threaded reply noting the change in issue status
 - Bot mentioned with `track <bug-number|bug-URL>` →
-  same behavior as NEW bug; also send threaded reply noting which user requested tracking
+  same behavior as New issue; also send threaded reply noting which user requested tracking
 
 ## Installing
 
@@ -32,7 +32,7 @@ env/bin/python triagebot.py
 
 Alternatively, a [container image](https://quay.io/repository/coreos/triagebot) is available.
 
-You'll also need to set up a Slack app in your workspace and get an API token for it, and to get a Bugzilla API key.
+You'll also need to set up a Slack app in your workspace and get an API token for it, and to get a Jira personal access token.
 
 ## Config format
 

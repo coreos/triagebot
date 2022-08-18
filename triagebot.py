@@ -3,13 +3,13 @@
 # Apache 2.0 license
 
 import argparse
-import bugzilla
 from croniter import croniter
 from datetime import datetime, timedelta, timezone
 from dotted_dict import DottedDict
 from functools import reduce, wraps
 from heapq import heappop, heappush
 from itertools import count
+from jira import JIRA, JIRAError
 import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -58,8 +58,8 @@ class Database:
         with self:
             ver = self._db.execute('pragma user_version').fetchone()[0]
             if ver < 1:
-                self._db.execute('create table bugs '
-                        '(bz integer unique not null, '
+                self._db.execute('create table issues '
+                        '(id integer unique not null, '
                         'channel text not null, '
                         'timestamp text not null, '
                         'resolved integer not null default 0, '
@@ -67,7 +67,7 @@ class Database:
                         'autoclose_unixtime integer, '
                         # may be null
                         'autoclose_comment_count integer)')
-                self._db.execute('create unique index bugs_messages on bugs '
+                self._db.execute('create unique index issues_messages on issues '
                         '(channel, timestamp)')
                 self._db.execute('create table specials '
                         '(name text unique not null, '
@@ -82,7 +82,7 @@ class Database:
                         'timestamp text not null)')
                 self._db.execute('create unique index events_unique '
                         'on events (channel, timestamp)')
-                self._db.execute('create index bugs_resolved on bugs '
+                self._db.execute('create index issues_resolved on issues '
                         '(resolved)')
                 self._db.execute('pragma user_version = 1')
 
@@ -99,48 +99,48 @@ class Database:
             return False
         return self._db.__exit__(exc_type, exc_value, tb)
 
-    def add_issue(self, bz, channel, ts):
-        self._db.execute('insert into bugs (bz, channel, timestamp) '
-                'values (?, ?, ?)', (bz, channel, ts))
+    def add_issue(self, id, channel, ts):
+        self._db.execute('insert into issues (id, channel, timestamp) '
+                'values (?, ?, ?)', (id, channel, ts))
 
-    def set_resolved(self, bz, resolved=True):
+    def set_resolved(self, id, resolved=True):
         # both resolve and unresolve disable autoclose
-        self._db.execute('update bugs set resolved = ?, '
+        self._db.execute('update issues set resolved = ?, '
                 'autoclose_unixtime = null, autoclose_comment_count = null '
-                'where bz == ?', (int(resolved), bz))
+                'where id == ?', (int(resolved), id))
 
-    def set_autoclose(self, bz, time, comment_count):
-        self._db.execute('update bugs set resolved = 0, '
+    def set_autoclose(self, id, time, comment_count):
+        self._db.execute('update issues set resolved = 0, '
                 'autoclose_unixtime = ?, autoclose_comment_count = ? '
-                'where bz == ?', (int(time.timestamp()), comment_count, bz))
+                'where id == ?', (int(time.timestamp()), comment_count, id))
 
     def list_unresolved(self):
-        res = self._db.execute('select bz from bugs where '
+        res = self._db.execute('select id from issues where '
                 'resolved == 0 order by timestamp').fetchall()
         return [r[0] for r in res]
 
     def list_autoclose(self):
-        res = self._db.execute('select bz from bugs where '
+        res = self._db.execute('select id from issues where '
                 'autoclose_unixtime not null order by timestamp').fetchall()
         return [r[0] for r in res]
 
-    def lookup_bz(self, bz):
+    def lookup_id(self, id):
         res = self._db.execute('select channel, timestamp, resolved, '
                 'autoclose_unixtime, autoclose_comment_count '
-                'from bugs where bz == ?', (bz,)).fetchone()
+                'from issues where id == ?', (id,)).fetchone()
         if res is None:
             raise KeyError
         channel, ts, resolved, close_time, close_comments = res
         return channel, ts, bool(resolved), close_time, close_comments
 
     def lookup_ts(self, channel, ts):
-        res = self._db.execute('select bz, resolved, autoclose_unixtime, '
-                'autoclose_comment_count from bugs where '
+        res = self._db.execute('select id, resolved, autoclose_unixtime, '
+                'autoclose_comment_count from issues where '
                 'channel == ? and timestamp == ?', (channel, ts)).fetchone()
         if res is None:
             raise KeyError
-        bz, resolved, close_time, close_comments = res
-        return bz, bool(resolved), close_time, close_comments
+        id, resolved, close_time, close_comments = res
+        return id, bool(resolved), close_time, close_comments
 
     def set_special(self, name, channel, id):
         self._db.execute('insert or replace into specials '
@@ -178,69 +178,88 @@ class Database:
 class Issue:
     # Database transactions must be supplied by the caller.
 
-    def __init__(self, config, client, bzapi, db, bz=None, channel=None,
-            ts=None):
+    def __init__(self, config, client, japi, db, id=None, key=None,
+            channel=None, ts=None):
         self._config = config
         self._client = client
-        self._bzapi = bzapi
+        self._japi = japi
         self._db = db
-        self.bz = bz
+        self.id = id
+        self.key = key
         self.channel = channel or config.channel  # default for new issue
         self.ts = ts
         self.resolved = False  # default for new issue
         self.autoclose_time = None  # default for new issue
         self.autoclose_comment_count = None  # default for new issue
-        if bz is not None:
+        if key is not None:
+            # convert to id, which is a stable long-term identifier
+            assert channel is None and ts is None and id is None
+            info = japi.issue(key, fields=[])
+            id = int(info.id)
+            self.id = id
+            # fall through
+        if id is not None:
             assert channel is None and ts is None
             try:
                 (self.channel, self.ts, self.resolved, self.autoclose_time,
-                        self.autoclose_comment_count) = db.lookup_bz(bz)
+                        self.autoclose_comment_count) = db.lookup_id(id)
             except KeyError:
                 # new issue hasn't been added yet
                 pass
         else:
             assert channel is not None and ts is not None
             # raises KeyError on unknown timestamp
-            (self.bz, self.resolved, self.autoclose_time,
+            (self.id, self.resolved, self.autoclose_time,
                     self.autoclose_comment_count) = db.lookup_ts(channel, ts)
         if self.autoclose_time is not None:
             self.autoclose_time = datetime.fromtimestamp(self.autoclose_time,
                     timezone.utc)
-        fields = ['summary', 'product', 'component', 'assigned_to', 'status',
-                'resolution', 'flags']
-        details = bzapi.getbug(self.bz, include_fields=fields)
+        fields = ['summary', 'project', 'components', 'assignee', 'status',
+                'resolution', config.needinfo_field]
+        info = japi.issue(self.id, fields=fields)
+        self.key = info.key
+        self.url = info.permalink()
         for field in fields:
-            setattr(self, field, getattr(details, field))
-        self.assigned_to_display = details.assigned_to_detail['real_name']
-        if not self.assigned_to_display:
-            self.assigned_to_display = details.assigned_to_detail['email']
-        self.needinfo = any(f['name'] == 'needinfo' and f['is_active']
-                for f in self.flags)
+            if field == config.needinfo_field:
+                self.needinfo = bool(getattr(info.fields, config.needinfo_field, []))
+            else:
+                setattr(self, field, getattr(info.fields, field))
+        self.assignee_name = self.assignee.displayName if self.assignee else 'nobody'
+        for component in self.components:
+            # prioritize the configured component if there are several
+            if component.name == config.jira_component:
+                self.component_name = component.name
+                break
+        else:
+            if self.components:
+                self.component_name = self.components[0].name
+            else:
+                self.component_name = 'none'
 
     def __str__(self):
-        return f'[{self.bz}] {self.summary}'
+        return f'[{self.key}] {self.summary}'
 
     @staticmethod
-    def is_unresolved(db, bz):
+    def is_unresolved(db, id):
         '''Class method returning True if the specified issue is posted and
         unresolved.  This allows the Jira polling loop to check whether
         to process an issue without constructing an Issue, since the latter
         makes an additional Jira query.'''
         try:
-            _, _, resolved, _, _ = db.lookup_bz(bz)
+            _, _, resolved, _, _ = db.lookup_id(id)
             return not resolved
         except KeyError:
             return False
 
     @classmethod
-    def list_unresolved(cls, config, client, bzapi, db):
-        for bz in db.list_unresolved():
-            yield cls(config, client, bzapi, db, bz=bz)
+    def list_unresolved(cls, config, client, japi, db):
+        for id in db.list_unresolved():
+            yield cls(config, client, japi, db, id=id)
 
     @classmethod
-    def list_autoclose(cls, config, client, bzapi, db):
-        for bz in db.list_autoclose():
-            yield cls(config, client, bzapi, db, bz=bz)
+    def list_autoclose(cls, config, client, japi, db):
+        for id in db.list_autoclose():
+            yield cls(config, client, japi, db, id=id)
 
     @property
     def posted(self):
@@ -254,8 +273,8 @@ class Issue:
 
     def get_comment_count(self):
         '''Get the number of comments, which is relatively expensive.'''
-        details = self._bzapi.getbug(self.bz, include_fields=['comments'])
-        return len(details.comments)
+        info = self._japi.issue(self.id, fields=['comment'])
+        return len(info.fields.comment.comments)
 
     def _make_message(self):
         '''Format the Slack message for an issue.'''
@@ -264,8 +283,8 @@ class Issue:
         elif self.autoclose:
             icon = ':timer_clock:'
         else:
-            icon = ':bugzilla:'
-        message = f'{icon} <{self._config.bugzilla_bug_url}{self.bz}|[{self.bz}] {escape(self.summary)}> :thread:'
+            icon = ':jira-1992:'
+        message = f'{icon} <{self.url}|[{self.key}] {escape(self.summary)}> :thread:'
         blocks = [
             {
                 'type': 'section',
@@ -278,14 +297,14 @@ class Issue:
         if self.resolved or self.autoclose:
             if self.autoclose:
                 status = f'Will close after *{format_date(self.autoclose_time)}*'
-            elif self.product != self._config.bugzilla_product:
-                status = f'Moved to *{escape(self.product)}*/*{escape(self.component)}*'
-            elif self.component != self._config.bugzilla_component:
-                status = f'Moved to *{escape(self.component)}*'
-            elif self.status == 'CLOSED':
-                status = f'Closed as *{escape(self.resolution)}*'
+            elif self.project.key != self._config.jira_project_key:
+                status = f'Moved to *{escape(self.project.name)}*/*{escape(self.component_name)}*'
+            elif self.component_name != self._config.jira_component:
+                status = f'Moved to *{escape(self.component_name)}*'
+            elif self.status.name == 'Closed':
+                status = f'Closed as *{escape(self.resolution.name)}*'
             else:
-                status = f'Assigned to *{escape(self.assigned_to_display)}*'
+                status = f'Assigned to *{escape(self.assignee_name)}*'
             blocks.append({
                 'type': 'context',
                 'elements': [
@@ -327,7 +346,7 @@ class Issue:
                 text=message, blocks=blocks, unfurl_links=False,
                 unfurl_media=False)['ts']
         self._client.pins_add(channel=self.channel, timestamp=self.ts)
-        self._db.add_issue(self.bz, self.channel, self.ts)
+        self._db.add_issue(self.id, self.channel, self.ts)
 
     def update_message(self):
         '''Rerender the existing Slack message for this issue.'''
@@ -339,16 +358,16 @@ class Issue:
     def check_can_autoclose(self):
         '''Check the issue against the autoclose rules, and return None if okay
         to autoclose or else a reason string.'''
-        if self.status != 'NEW':
-            return f'status is *{self.status}*'
-        elif self.assigned_to != self._config.bugzilla_assignee:
-            return f'assignee is *{escape(self.assigned_to_display)}*'
-        elif self.product != self._config.bugzilla_product:
-            return f'product is *{escape(self.product)}*'
-        elif self.component != self._config.bugzilla_component:
-            return f'component is *{escape(self.component)}*'
+        if self.status.name != 'New':
+            return f'status is *{self.status.name}*'
+        elif self.assignee is not None and self.assignee.name != self._config.jira_assignee_id:
+            return f'assignee is *{escape(self.assignee_name)}*'
+        elif self.project.key != self._config.jira_project_key:
+            return f'project is *{escape(self.project.name)}*'
+        elif self.component_name != self._config.jira_component:
+            return f'component is *{escape(self.component_name)}*'
         elif not self.needinfo:
-            return 'does not have needinfo set'
+            return 'does not have Need Info From set'
         else:
             return None
 
@@ -369,7 +388,7 @@ class Issue:
         except SlackApiError as e:
             if e.response['error'] != 'already_pinned':
                 raise
-        self._db.set_autoclose(self.bz, self.autoclose_time,
+        self._db.set_autoclose(self.id, self.autoclose_time,
                 self.autoclose_comment_count)
 
     def refresh_autoclose(self):
@@ -384,14 +403,18 @@ class Issue:
             self.log('_Comment added to issue, disabling autoclose._')
             self.unresolve()
         elif self.autoclose_time < datetime.now(timezone.utc):
-            self._bzapi.update_bugs([self.bz], self._bzapi.build_update(
-                status='CLOSED',
-                resolution='INSUFFICIENT_DATA',
-                comment="We are unable to make progress on this issue without the requested information, so the issue is now being closed. If the problem persists, please provide the requested information and reopen the issue.",
-            ))
-            self.log('_Issue timeout reached, closing as INSUFFICIENT_DATA._')
-            self.status = 'CLOSED'
-            self.resolution = 'INSUFFICIENT_DATA'
+            self._japi.transition_issue(self.id, 'Closed',
+                resolution={'name': 'Cannot Reproduce'},
+                comment="We are unable to make progress on this issue without the requested information, so the issue is now being closed. If the problem persists, please provide the requested information and reopen the issue."
+            )
+            # we just automatically watched the issue
+            self._japi.remove_watcher(self.id, self._config.jira_id)
+            self.log('_Issue timeout reached, closing as Cannot Reproduce._')
+            # refresh invalidated fields
+            fields = ['status', 'resolution']
+            info = self._japi.issue(self.id, fields=fields)
+            for field in fields:
+                setattr(self, field, getattr(info.fields, field))
             self.resolve()
 
     def resolve(self):
@@ -406,7 +429,7 @@ class Issue:
         except SlackApiError as e:
             if e.response['error'] != 'no_pin':
                 raise
-        self._db.set_resolved(self.bz)
+        self._db.set_resolved(self.id)
 
     def unresolve(self):
         '''Mark the issue unresolved and record in DB.  Safe to call if
@@ -420,7 +443,7 @@ class Issue:
         except SlackApiError as e:
             if e.response['error'] != 'already_pinned':
                 raise
-        self._db.set_resolved(self.bz, False)
+        self._db.set_resolved(self.id, False)
 
     def log(self, message):
         '''Post the specified message as a threaded reply to the issue.'''
@@ -429,16 +452,16 @@ class Issue:
                 thread_ts=self.ts)
 
 
-def post_report(config, client, bzapi, db):
+def post_report(config, client, japi, db):
     '''Post a summary of unresolved issues to the channel.  Return the channel
     and timestamp.'''
     parts = []
-    for issue in Issue.list_unresolved(config, client, bzapi, db):
+    for issue in Issue.list_unresolved(config, client, japi, db):
         age_days = int((time.time() - float(issue.ts)) / 86400)
         link = client.chat_getPermalink(channel=issue.channel,
                 message_ts=issue.ts)["permalink"]
-        icon = ':timer_clock:' if issue.autoclose else ':bugzilla:'
-        part = f'{icon} <{config.bugzilla_bug_url}{issue.bz}|[{issue.bz}]> <{link}|{escape(issue.summary)}> ({age_days} days)'
+        icon = ':timer_clock:' if issue.autoclose else ':jira-1992:'
+        part = f'{icon} <{issue.url}|[{issue.key}]> <{link}|{escape(issue.summary)}> ({age_days} days)'
         parts.append(part)
     if not parts:
         parts.append('_No issues!_')
@@ -457,17 +480,13 @@ def report_errors(f):
     '''Decorator that sends exceptions to an administrator via Slack DM
     and then swallows them.  The first argument of the function must be
     the config.'''
-    import json, requests, socket, urllib.error
+    import socket, urllib.error
     @wraps(f)
     def wrapper(config, *args, **kwargs):
         try:
             return f(config, *args, **kwargs)
         except HandledError:
             pass
-        except (json.JSONDecodeError, requests.ConnectionError, requests.HTTPError, requests.ReadTimeout) as e:
-            # Exception type leaked from the bugzilla API.  Assume transient
-            # network problem; don't send message.
-            print(e)
         except (socket.timeout, urllib.error.URLError) as e:
             # Exception type leaked from the slack_sdk API.  Assume transient
             # network problem; don't send message.
@@ -489,11 +508,10 @@ def process_event(config, socket_client, req):
     client = socket_client.web_client
     payload = DottedDict(req.payload)
     db = Database(config)
-    bzapi = bugzilla.Bugzilla(config.bugzilla, api_key=config.bugzilla_key,
-            force_rest=True)
+    japi = JIRA(config.jira, token_auth=config.jira_token)
 
     def make_issue(**kwargs):
-        return Issue(config, client, bzapi, db, **kwargs)
+        return Issue(config, client, japi, db, **kwargs)
 
     def ack_event():
         '''Acknowledge the event, as required by Slack.'''
@@ -551,7 +569,7 @@ def process_event(config, socket_client, req):
                         timestamp=payload.event.ts,
                         name='hourglass_flowing_sand')
                 try:
-                    for issue in Issue.list_unresolved(config, client, bzapi, db):
+                    for issue in Issue.list_unresolved(config, client, japi, db):
                         issue.update_message()
                 finally:
                     client.reactions_remove(channel=payload.event.channel,
@@ -560,19 +578,19 @@ def process_event(config, socket_client, req):
                 complete_command()
             elif message.startswith('track '):
                 try:
-                    # Accept an issue key or an issue URL with optional anchor.
-                    # Slack puts URLs inside <>.
-                    bz = int(message.replace('track ', '', 1). \
-                            replace(config.bugzilla_bug_url, '', 1). \
-                            split('#')[0]. \
-                            strip(' <>'))
+                    # Accept an issue key or an issue URL with optional query
+                    # string.  Slack puts URLs inside <>.
+                    key = message.replace('track ', '', 1). \
+                            replace(config.jira_issue_url, '', 1). \
+                            split('?')[0]. \
+                            strip(' <>')
                 except ValueError:
                     fail_command("Invalid issue key.")
-                issue = make_issue(bz=bz)
+                issue = make_issue(key=key)
                 if issue.posted:
                     link = client.chat_getPermalink(channel=issue.channel,
                             message_ts=issue.ts)["permalink"]
-                    fail_command(f"Issue {bz} <{link}|already tracked>.")
+                    fail_command(f"Issue {key} <{link}|already tracked>.")
                 issue.post()
                 issue.log(f'_Requested by <@{payload.event.user}>._')
                 complete_command()
@@ -584,7 +602,7 @@ def process_event(config, socket_client, req):
                         timestamp=payload.event.ts,
                         name='hourglass_flowing_sand')
                 try:
-                    post_report(config, client, bzapi, db)
+                    post_report(config, client, japi, db)
                 finally:
                     client.reactions_remove(channel=payload.event.channel,
                             timestamp=payload.event.ts,
@@ -593,8 +611,7 @@ def process_event(config, socket_client, req):
             elif message == 'ping':
                 # Check Jira connectivity
                 try:
-                    if not bzapi.logged_in:
-                        raise Exception('Not logged in.')
+                    japi.my_permissions()
                 except Exception:
                     # Swallow exception details and just report the failure
                     fail_command('Cannot contact Jira.')
@@ -604,7 +621,7 @@ def process_event(config, socket_client, req):
                 except KeyError:
                     fail_command('Have never successfully polled Jira.')
                 time_since_check = time.time() - last_check
-                if time_since_check > 1.5 * config.bugzilla_poll_interval:
+                if time_since_check > 1.5 * config.jira_poll_interval:
                     fail_command(f'Last successful Jira poll was {int(time_since_check / 60)} minutes ago.')
                 complete_command()
             elif message == 'help':
@@ -639,24 +656,29 @@ def process_event(config, socket_client, req):
                         thread_ts=payload.container.message_ts)
                 return
             if payload.actions[0].value == 'resolve':
-                if issue.product != config.bugzilla_product:
-                    status = f'Issue now in *{escape(issue.product)}*/*{escape(issue.component)}*.'
-                elif issue.component != config.bugzilla_component:
-                    status = f'Issue now in *{escape(issue.component)}*.'
-                elif issue.status == 'CLOSED':
-                    status = f'Issue now *CLOSED/{escape(issue.resolution)}*.'
-                elif issue.status == 'NEW':
+                if issue.project.key != config.jira_project_key:
+                    status = f'Issue now in *{escape(issue.project.name)}*/*{escape(issue.component_name)}*.'
+                elif issue.component_name != config.jira_component:
+                    status = f'Issue now in *{escape(issue.component_name)}*.'
+                elif issue.status.name == 'Closed':
+                    status = f'Issue now *Closed/{escape(issue.resolution.name)}*.'
+                elif issue.status.name == 'New':
                     client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Issue still in component {escape(config.bugzilla_component)} and status NEW, cannot resolve.",
+                            text=f"<@{payload.user.id}> Issue still in component {escape(config.jira_component)} and status New, cannot resolve.",
                             thread_ts=payload.container.message_ts)
                     return
-                elif issue.assigned_to == config.bugzilla_assignee:
+                elif issue.assignee is None:
                     client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Issue still assigned to {escape(issue.assigned_to_display)}, cannot resolve.",
+                            text=f"<@{payload.user.id}> Issue unassigned, cannot resolve.",
+                            thread_ts=payload.container.message_ts)
+                    return
+                elif issue.assignee.name == config.jira_assignee_id:
+                    client.chat_postMessage(channel=payload.container.channel_id,
+                            text=f"<@{payload.user.id}> Issue still assigned to {escape(issue.assignee_name)}, cannot resolve.",
                             thread_ts=payload.container.message_ts)
                     return
                 else:
-                    status = f'Issue now *{escape(issue.status)}*, assigned to *{escape(issue.assigned_to_display)}*.'
+                    status = f'Issue now *{escape(issue.status.name)}*, assigned to *{escape(issue.assignee_name)}*.'
                 issue.resolve()
                 issue.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.slack_id}> unresolve`')
             elif payload.actions[0].value == 'autoclose':
@@ -671,13 +693,13 @@ def process_event(config, socket_client, req):
 
 
 class Scheduler:
-    def __init__(self, config, client, bzapi, db):
+    def __init__(self, config, client, japi, db):
         self._config = config
-        self._bzapi = bzapi
+        self._japi = japi
         self._client = client
         self._db = db
         self._jobs = []
-        self._add_timer(self._check_bugzilla, 'bugzilla_poll_interval', 300)
+        self._add_timer(self._check_jira, 'jira_poll_interval', 300)
         self._add_cron(self._post_report, 'report_schedule')
 
     def _add_cron(self, fn, config_key, default=None):
@@ -717,27 +739,25 @@ class Scheduler:
                     break
             heappush(self._jobs, (nex, idx, fn, it))
 
-    def _check_bugzilla(self, _config):
+    def _check_jira(self, _config):
+        # we don't do any escaping; the jira package doesn't support it
+        # https://github.com/pycontribs/jira/issues/970
         queries = [
-            # NEW issues
-            self._bzapi.build_query(product=self._config.bugzilla_product,
-                    component=self._config.bugzilla_component, status='NEW'),
+            # New issues
+            f'project = {self._config.jira_project_key} AND component = "{self._config.jira_component}" AND status = New',
             # Open issues assigned to default assignee
-            self._bzapi.build_query(product=self._config.bugzilla_product,
-                    component=self._config.bugzilla_component,
-                    status='__open__',
-                    assigned_to=self._config.bugzilla_assignee),
+            f'project = {self._config.jira_project_key} AND component = "{self._config.jira_component}" AND status != Closed AND assignee = {self._config.jira_assignee_id}',
         ]
-        bzs = set()
-        for query in queries:
-            query['include_fields'] = ['id']
-            bzs.update(bz.id for bz in self._bzapi.query(query))
+        results = self._japi.search_issues(
+            ' OR '.join([f'({q})' for q in queries]),
+            fields=[], maxResults=False
+        )
 
-        for bz in sorted(bzs):
+        for id in sorted([int(v.id) for v in results]):
             with self._db:
-                if not Issue.is_unresolved(self._db, bz):
-                    issue = Issue(self._config, self._client, self._bzapi,
-                            self._db, bz=bz)
+                if not Issue.is_unresolved(self._db, id):
+                    issue = Issue(self._config, self._client, self._japi,
+                            self._db, id=id)
                     if not issue.posted:
                         # Unknown issue; post it
                         issue.post()
@@ -746,12 +766,12 @@ class Scheduler:
                         assert issue.resolved
                         issue.unresolve()
                         self._client.chat_postMessage(channel=issue.channel,
-                                text=f'_Issue now *{escape(issue.status)}* in *{escape(issue.component)}*, assigned to *{escape(issue.assigned_to_display)}*. Unresolving._',
+                                text=f'_Issue now *{escape(issue.status.name)}* in *{escape(issue.component_name)}*, assigned to *{escape(issue.assignee_name)}*. Unresolving._',
                                 thread_ts=issue.ts)
 
         with self._db:
             for issue in Issue.list_autoclose(self._config, self._client,
-                    self._bzapi, self._db):
+                    self._japi, self._db):
                 issue.refresh_autoclose()
 
         with self._db:
@@ -791,7 +811,7 @@ class Scheduler:
 
     def _post_report(self, _config):
         with self._db:
-            post_report(self._config, self._client, self._bzapi, self._db)
+            post_report(self._config, self._client, self._japi, self._db)
 
 
 def main():
@@ -808,9 +828,9 @@ def main():
         config = DottedDict(yaml.safe_load(fh))
         config.database = os.path.expanduser(args.database)
     env_map = (
+        ('TRIAGEBOT_JIRA_TOKEN', 'jira-token'),
         ('TRIAGEBOT_SLACK_APP_TOKEN', 'slack-app-token'),
         ('TRIAGEBOT_SLACK_TOKEN', 'slack-token'),
-        ('TRIAGEBOT_BUGZILLA_KEY', 'bugzilla-key')
     )
     for env, config_key in env_map:
         v = os.environ.get(env)
@@ -819,12 +839,20 @@ def main():
 
     # Connect to services
     client = WebClient(token=config.slack_token)
-    # store our user ID
+    # store our user IDs
     config.slack_id = client.auth_test()['user_id']
-    bzapi = bugzilla.Bugzilla(config.bugzilla, api_key=config.bugzilla_key,
-            force_rest=True)
-    if not bzapi.logged_in:
+    japi = JIRA(config.jira, token_auth=config.jira_token)
+    try:
+        config.jira_id = japi.myself()['name']
+    except JIRAError:
         raise Exception('Did not authenticate')
+    # look up custom fields
+    for field in japi.fields():
+        if field['name'] == 'Need Info From':
+            config.needinfo_field = field['id']
+            break
+    else:
+        raise Exception("Couldn't find needinfo field")
     db = Database(config)
 
     # Start socket-mode listener in the background
@@ -835,7 +863,7 @@ def main():
     socket_client.connect()
 
     # Run scheduler
-    Scheduler(config, client, bzapi, db).run()
+    Scheduler(config, client, japi, db).run()
 
 
 if __name__ == '__main__':
