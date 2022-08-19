@@ -525,7 +525,7 @@ def process_event(config, socket_client, req):
                 # When we ignore some events, Slack can send us duplicate
                 # retries.  Detect and ignore those after acknowledging.
                 return
-            message = payload.event.text.replace(f'<@{config.bot_id}>', '').strip()
+            message = payload.event.text.replace(f'<@{config.slack_id}>', '').strip()
             if message == 'unresolve':
                 if 'thread_ts' not in payload.event:
                     fail_command('`unresolve` command must be used in a thread.')
@@ -616,7 +616,7 @@ def process_event(config, socket_client, req):
                 complete_command()
                 raise Exception(f'Throwing exception as requested by <@{payload.event.user}>')
             else:
-                fail_command(f"I didn't understand that.  Try `<@{config.bot_id}> help`")
+                fail_command(f"I didn't understand that.  Try `<@{config.slack_id}> help`")
         elif (req.type == 'interactive' and payload.type == 'block_actions' and
                 payload.actions[0].value in ('resolve', 'autoclose')):
             if payload.container.channel_id != config.channel:
@@ -658,7 +658,7 @@ def process_event(config, socket_client, req):
                 else:
                     status = f'Issue now *{escape(issue.status)}*, assigned to *{escape(issue.assigned_to_display)}*.'
                 issue.resolve()
-                issue.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.bot_id}> unresolve`')
+                issue.log(f'_Resolved by <@{payload.user.id}>. {status} Unresolve with_ `<@{config.slack_id}> unresolve`')
             elif payload.actions[0].value == 'autoclose':
                 fail_reason = issue.check_can_autoclose()
                 if fail_reason is not None:
@@ -667,7 +667,7 @@ def process_event(config, socket_client, req):
                             thread_ts=payload.container.message_ts)
                     return
                 issue.set_autoclose()
-                issue.log(f'_Will close unless an issue comment is added by *{format_date(issue.autoclose_time)}*, as requested by <@{payload.user.id}>. Disable with_ `<@{config.bot_id}> unresolve`')
+                issue.log(f'_Will close unless an issue comment is added by *{format_date(issue.autoclose_time)}*, as requested by <@{payload.user.id}>. Disable with_ `<@{config.slack_id}> unresolve`')
 
 
 class Scheduler:
@@ -820,7 +820,7 @@ def main():
     # Connect to services
     client = WebClient(token=config.slack_token)
     # store our user ID
-    config.bot_id = client.auth_test()['user_id']
+    config.slack_id = client.auth_test()['user_id']
     bzapi = bugzilla.Bugzilla(config.bugzilla, api_key=config.bugzilla_key,
             force_rest=True)
     if not bzapi.logged_in:
