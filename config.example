@@ -28,6 +28,6 @@ jira-project-key: OCPBUGS
 # Component to scan for New bugs and open bugs assigned to default assignee
 jira-component: RHCOS
 # Default assignee for component
-jira-assignee-key: bovik
+jira-assignee-id: bovik
 # Jira polling interval in seconds
 jira-poll-interval: 300
