@@ -4,28 +4,28 @@ slack-app-token: xapp-1-xxx
 # Slack workspace token
 # (if not specified in TRIAGEBOT_SLACK_TOKEN env var)
 slack-token: xoxb-xxx
-# Destination channel for new bugs
+# Destination channel for new issues
 channel: Cxxx
 # User ID that will receive error tracebacks via DM
 error-notification: Uxxx
 # How long of an outage to allow before the channel is notified
 watchdog-minutes: 30
-# When to summarize unresolved bugs to the channel.  Cron syntax, with an
+# When to summarize unresolved issues to the channel.  Cron syntax, with an
 # extra field for seconds.  Optional.
 report-schedule: "0 9 * * 1"
-# Manually-invoked bug close timeout in minutes
+# Manually-invoked issue close timeout in minutes
 autoclose-minutes: 20160
 
 # URL of the Jira server
 jira: https://issues.redhat.com/
-# Prefix of user-friendly bug URL
+# Prefix of user-friendly issue URL
 jira-issue-url: https://issues.redhat.com/browse/
 # Jira personal access token
 # (if not specified in TRIAGEBOT_JIRA_TOKEN env var)
 jira-token: xxx
 # Project key containing the jira-component
 jira-project-key: OCPBUGS
-# Component to scan for New bugs and open bugs assigned to default assignee
+# Component to scan for New issues and open issues assigned to default assignee
 jira-component: RHCOS
 # Default assignee for component
 jira-assignee-id: bovik
