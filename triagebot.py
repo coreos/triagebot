@@ -360,7 +360,7 @@ class Issue:
         to autoclose or else a reason string.'''
         if self.status.name != 'New':
             return f'status is *{self.status.name}*'
-        elif self.assignee is not None and self.assignee.name != self._config.jira_assignee_id:
+        elif self.assignee is not None:
             return f'assignee is *{escape(self.assignee_name)}*'
         elif self.project.key != self._config.jira_project_key:
             return f'project is *{escape(self.project.name)}*'
@@ -672,11 +672,6 @@ def process_event(config, socket_client, req):
                             text=f"<@{payload.user.id}> Issue unassigned, cannot resolve.",
                             thread_ts=payload.container.message_ts)
                     return
-                elif issue.assignee.name == config.jira_assignee_id:
-                    client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Issue still assigned to {escape(issue.assignee_name)}, cannot resolve.",
-                            thread_ts=payload.container.message_ts)
-                    return
                 else:
                     status = f'Issue now *{escape(issue.status.name)}*, assigned to *{escape(issue.assignee_name)}*.'
                 issue.resolve()
@@ -745,8 +740,8 @@ class Scheduler:
         queries = [
             # New issues
             f'project = {self._config.jira_project_key} AND component = "{self._config.jira_component}" AND status = New',
-            # Open issues assigned to default assignee
-            f'project = {self._config.jira_project_key} AND component = "{self._config.jira_component}" AND status != Closed AND assignee = {self._config.jira_assignee_id}',
+            # Open unassigned issues
+            f'project = {self._config.jira_project_key} AND component = "{self._config.jira_component}" AND status != Closed AND assignee IS EMPTY',
         ]
         results = self._japi.search_issues(
             ' OR '.join([f'({q})' for q in queries]),

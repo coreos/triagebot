@@ -25,9 +25,7 @@ jira-issue-url: https://issues.redhat.com/browse/
 jira-token: xxx
 # Project key containing the jira-component
 jira-project-key: OCPBUGS
-# Component to scan for New issues and open issues assigned to default assignee
+# Component to scan for New issues and open unassigned issues
 jira-component: RHCOS
-# Default assignee for component
-jira-assignee-id: bovik
 # Jira polling interval in seconds
 jira-poll-interval: 300
