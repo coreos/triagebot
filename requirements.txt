@@ -2,4 +2,5 @@ croniter
 dotted-dict
 jira
 PyYAML
+requests
 slack_sdk
