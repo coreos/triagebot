@@ -8,13 +8,13 @@ This is a simple Slack bot to help with triaging Jira issues.  It reports new is
   send message to channel and pin it to the channel
 - Open unassigned issue arrives on the configured component →
   same behavior as New issue
-- "Resolve" button clicked on a issue message →
+- "Resolve" button clicked on an issue message →
   unpin message from channel, update message to show that the issue is resolved, log resolution as threaded reply
 - Bot mentioned in `unresolve` message in issue thread →
   repin message to channel, update message to show that the issue is unresolved
 - Resolved issue is moved to New or to any open state with no assignee, in the configured component →
   same behavior as `unresolve` message; also send threaded reply noting the change in issue status
-- Bot mentioned with `track <bug-number|bug-URL>` →
+- Bot mentioned with `track <issue-key|issue-URL>` →
   same behavior as New issue; also send threaded reply noting which user requested tracking
 
 ## Installing
