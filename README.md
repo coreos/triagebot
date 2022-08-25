@@ -1,6 +1,6 @@
 # Triagebot
 
-This is a simple Slack bot to help with triaging Jira issues.  It reports new issues to a designated Slack channel and tracks whether the issues have been triaged.
+This is a Slack bot to help with triaging Jira issues.  It reports new issues to a designated Slack channel and tracks whether the issues have been triaged.
 
 ## Flows
 
