@@ -846,12 +846,8 @@ def main():
     except JIRAError:
         raise Exception('Did not authenticate')
     # look up custom fields
-    for field in japi.fields():
-        if field['name'] == 'Need Info From':
-            config.needinfo_field = field['id']
-            break
-    else:
-        raise Exception("Couldn't find needinfo field")
+    field_map = {f['name']: f['id'] for f in japi.fields()}
+    config.needinfo_field = field_map['Need Info From']
     db = Database(config)
 
     # Start socket-mode listener in the background
