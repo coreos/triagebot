@@ -225,16 +225,8 @@ class Issue:
             else:
                 setattr(self, field, getattr(info.fields, field))
         self.assignee_name = self.assignee.displayName if self.assignee else 'nobody'
-        for component in self.components:
-            # prioritize the configured component if there are several
-            if component.name == config.jira_component:
-                self.component_name = component.name
-                break
-        else:
-            if self.components:
-                self.component_name = self.components[0].name
-            else:
-                self.component_name = 'none'
+        self.components = [c.name for c in self.components]
+        self.components_desc = " + ".join(self.components) or 'none'
 
     def __str__(self):
         return f'[{self.key}] {self.summary}'
@@ -298,9 +290,9 @@ class Issue:
             if self.autoclose:
                 status = f'Will close after *{format_date(self.autoclose_time)}*'
             elif self.project.key != self._config.jira_project_key:
-                status = f'Moved to *{escape(self.project.name)}*/*{escape(self.component_name)}*'
-            elif self.component_name != self._config.jira_component:
-                status = f'Moved to *{escape(self.component_name)}*'
+                status = f'Moved to *{escape(self.project.name)}*/*{escape(self.components_desc)}*'
+            elif self._config.jira_component not in self.components:
+                status = f'Moved to *{escape(self.components_desc)}*'
             elif self.status.name == 'Closed':
                 status = f'Closed as *{escape(self.resolution.name)}*'
             else:
@@ -364,8 +356,8 @@ class Issue:
             return f'assignee is *{escape(self.assignee_name)}*'
         elif self.project.key != self._config.jira_project_key:
             return f'project is *{escape(self.project.name)}*'
-        elif self.component_name != self._config.jira_component:
-            return f'component is *{escape(self.component_name)}*'
+        elif self._config.jira_component not in self.components:
+            return f'component is *{escape(self.components_desc)}*'
         elif not self.needinfo:
             return 'does not have Need Info From set'
         else:
@@ -661,9 +653,9 @@ def process_event(config, socket_client, req):
                 return
             if payload.actions[0].value == 'resolve':
                 if issue.project.key != config.jira_project_key:
-                    status = f'Issue now in *{escape(issue.project.name)}*/*{escape(issue.component_name)}*.'
-                elif issue.component_name != config.jira_component:
-                    status = f'Issue now in *{escape(issue.component_name)}*.'
+                    status = f'Issue now in *{escape(issue.project.name)}*/*{escape(issue.components_desc)}*.'
+                elif config.jira_component not in issue.components:
+                    status = f'Issue now in *{escape(issue.components_desc)}*.'
                 elif issue.status.name == 'Closed':
                     status = f'Issue now *Closed/{escape(issue.resolution.name)}*.'
                 elif issue.status.name == 'New':
@@ -765,7 +757,7 @@ class Scheduler:
                         assert issue.resolved
                         issue.unresolve()
                         self._client.chat_postMessage(channel=issue.channel,
-                                text=f'_Issue now *{escape(issue.status.name)}* in *{escape(issue.component_name)}*, assigned to *{escape(issue.assignee_name)}*. Unresolving._',
+                                text=f'_Issue now *{escape(issue.status.name)}* in *{escape(issue.components_desc)}*, assigned to *{escape(issue.assignee_name)}*. Unresolving._',
                                 thread_ts=issue.ts)
 
         with self._db:
