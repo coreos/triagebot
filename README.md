@@ -40,6 +40,14 @@ Alternatively, a [container image](https://quay.io/repository/coreos/triagebot) 
 
 You'll also need to set up a Slack app in your workspace and get an API token for it, and to get a Jira personal access token.
 
+## Slack scopes
+
+- `app_mentions:read` - receive commands via mentions in channel
+- `chat:write` - send messages and threaded replies to channel
+- `im:write` - send error reports to the bot administrator
+- `pins:write` - pin/unpin unresolved threads in channel
+- `reactions:write` - react to command messages to indicate status
+
 ## Config format
 
 See [config.example](config.example).  Put this in `~/.triagebot` by default.
