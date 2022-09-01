@@ -290,7 +290,7 @@ class Issue:
             if self.autoclose:
                 status = f'Will close after *{format_date(self.autoclose_time)}*'
             elif self.project.key != self._config.jira_project_key:
-                status = f'Moved to *{escape(self.project.name)}*/*{escape(self.components_desc)}*'
+                status = f'Moved to *{escape(self.project.key)}*/*{escape(self.components_desc)}*'
             elif self._config.jira_component not in self.components:
                 status = f'Moved to *{escape(self.components_desc)}*'
             elif self.status.name == 'Closed':
@@ -355,7 +355,7 @@ class Issue:
         elif self.assignee is not None:
             return f'assignee is *{escape(self.assignee_name)}*'
         elif self.project.key != self._config.jira_project_key:
-            return f'project is *{escape(self.project.name)}*'
+            return f'project is *{escape(self.project.key)}*'
         elif self._config.jira_component not in self.components:
             return f'component is *{escape(self.components_desc)}*'
         elif not self.needinfo:
@@ -653,7 +653,7 @@ def process_event(config, socket_client, req):
                 return
             if payload.actions[0].value == 'resolve':
                 if issue.project.key != config.jira_project_key:
-                    status = f'Issue now in *{escape(issue.project.name)}*/*{escape(issue.components_desc)}*.'
+                    status = f'Issue now in *{escape(issue.project.key)}*/*{escape(issue.components_desc)}*.'
                 elif config.jira_component not in issue.components:
                     status = f'Issue now in *{escape(issue.components_desc)}*.'
                 elif issue.status.name == 'Closed':
