@@ -6,7 +6,7 @@ import argparse
 from croniter import croniter
 from datetime import datetime, timedelta, timezone
 from dotted_dict import DottedDict
-from functools import reduce, wraps
+from functools import cached_property, reduce, wraps
 from heapq import heappop, heappush
 from itertools import count
 from jira import JIRA, JIRAError
@@ -263,6 +263,26 @@ class Issue:
         '''True if this issue has been configured to autoclose.'''
         return self.autoclose_time is not None
 
+    @cached_property
+    def interesting_component(self):
+        '''True if any of the issue's components is relevant to us.'''
+        return any((self.project.key, c) in self._config.components
+                for c in self.components)
+
+    @cached_property
+    def interesting_assignee(self):
+        '''True if the issue is unassigned or assigned to the component
+        default assignee.'''
+        if not self.interesting_component:
+            raise ValueError('components are not interesting')
+        return (
+            self.assignee is None or
+            any(
+                self._config.components.get((self.project.key, c)) == self.assignee.name
+                for c in self.components
+            )
+        )
+
     def get_comment_count(self):
         '''Get the number of comments, which is relatively expensive.'''
         info = self._japi.issue(self.id, fields=['comment'])
@@ -289,10 +309,8 @@ class Issue:
         if self.resolved or self.autoclose:
             if self.autoclose:
                 status = f'Will close after *{format_date(self.autoclose_time)}*'
-            elif self.project.key != self._config.jira_project_key:
+            elif not self.interesting_component:
                 status = f'Moved to *{escape(self.project.key)}*/*{escape(self.components_desc)}*'
-            elif self._config.jira_component not in self.components:
-                status = f'Moved to *{escape(self.components_desc)}*'
             elif self.status.name == 'Closed':
                 status = f'Closed as *{escape(self.resolution.name)}*'
             else:
@@ -352,12 +370,10 @@ class Issue:
         to autoclose or else a reason string.'''
         if self.status.name != 'New':
             return f'status is *{self.status.name}*'
-        elif self.assignee is not None:
+        elif not self.interesting_component:
+            return f'component is *{escape(self.project.key)}*/*{escape(self.components_desc)}*'
+        elif not self.interesting_assignee:
             return f'assignee is *{escape(self.assignee_name)}*'
-        elif self.project.key != self._config.jira_project_key:
-            return f'project is *{escape(self.project.key)}*'
-        elif self._config.jira_component not in self.components:
-            return f'component is *{escape(self.components_desc)}*'
         elif not self.needinfo:
             return 'does not have Need Info From set'
         else:
@@ -652,20 +668,18 @@ def process_event(config, socket_client, req):
                         thread_ts=payload.container.message_ts)
                 return
             if payload.actions[0].value == 'resolve':
-                if issue.project.key != config.jira_project_key:
+                if not issue.interesting_component:
                     status = f'Issue now in *{escape(issue.project.key)}*/*{escape(issue.components_desc)}*.'
-                elif config.jira_component not in issue.components:
-                    status = f'Issue now in *{escape(issue.components_desc)}*.'
                 elif issue.status.name == 'Closed':
                     status = f'Issue now *Closed/{escape(issue.resolution.name)}*.'
                 elif issue.status.name == 'New':
                     client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Issue still in component {escape(config.jira_component)} and status New, cannot resolve.",
+                            text=f"<@{payload.user.id}> Issue still in component *{escape(issue.project.key)}*/*{escape(issue.components_desc)}* and status *New*, cannot resolve.",
                             thread_ts=payload.container.message_ts)
                     return
-                elif issue.assignee is None:
+                elif issue.interesting_assignee:
                     client.chat_postMessage(channel=payload.container.channel_id,
-                            text=f"<@{payload.user.id}> Issue unassigned, cannot resolve.",
+                            text=f"<@{payload.user.id}> Issue still assigned to *{escape(issue.assignee_name)}*, cannot resolve.",
                             thread_ts=payload.container.message_ts)
                     return
                 else:
@@ -733,16 +747,22 @@ class Scheduler:
     def _check_jira(self, _config):
         # we don't do any escaping; the jira package doesn't support it
         # https://github.com/pycontribs/jira/issues/970
-        queries = [
+        component_terms = []
+        component_assignee_terms = []
+        for (project, component), assignee in self._config.components.items():
+            base_term = f'project = "{project}" AND component = "{component}"'
+            assignee_term = 'assignee IS EMPTY'
+            if assignee is not None:
+                assignee_term += f' OR assignee = "{assignee}"'
+            component_terms.append(base_term)
+            component_assignee_terms.append(f'{base_term} AND ({assignee_term})')
+        query = (
             # New issues
-            f'project = {self._config.jira_project_key} AND component = "{self._config.jira_component}" AND status = New',
-            # Open unassigned issues
-            f'project = {self._config.jira_project_key} AND component = "{self._config.jira_component}" AND status != Closed AND assignee IS EMPTY',
-        ]
-        results = self._japi.search_issues(
-            ' OR '.join([f'({q})' for q in queries]),
-            fields=[], maxResults=False
+            f'status = New AND ({" OR ".join(component_terms)}) OR ' +
+            # Open issues with default or unspecified assignee
+            f'status != Closed AND ({" OR ".join(component_assignee_terms)})'
         )
+        results = self._japi.search_issues(query, fields=[], maxResults=False)
 
         for id in sorted([int(v.id) for v in results]):
             with self._db:
@@ -757,7 +777,7 @@ class Scheduler:
                         assert issue.resolved
                         issue.unresolve()
                         self._client.chat_postMessage(channel=issue.channel,
-                                text=f'_Issue now *{escape(issue.status.name)}* in *{escape(issue.components_desc)}*, assigned to *{escape(issue.assignee_name)}*. Unresolving._',
+                                text=f'_Issue now *{escape(issue.status.name)}* in *{escape(issue.project.key)}*/*{escape(issue.components_desc)}*, assigned to *{escape(issue.assignee_name)}*. Unresolving._',
                                 thread_ts=issue.ts)
 
         with self._db:
@@ -818,6 +838,11 @@ def main():
     with open(os.path.expanduser(args.config)) as fh:
         config = DottedDict(yaml.safe_load(fh))
         config.database = os.path.expanduser(args.database)
+        # (project, component) -> default assignee or None
+        config.components = {
+            (i.project_key, i.component): i.get('default_assignee')
+            for i in config.jira_components
+        }
     env_map = (
         ('TRIAGEBOT_JIRA_TOKEN', 'jira-token'),
         ('TRIAGEBOT_SLACK_APP_TOKEN', 'slack-app-token'),

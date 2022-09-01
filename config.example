@@ -23,9 +23,15 @@ jira-issue-url: https://issues.redhat.com/browse/
 # Jira personal access token
 # (if not specified in TRIAGEBOT_JIRA_TOKEN env var)
 jira-token: xxx
-# Project key containing the jira-component
-jira-project-key: OCPBUGS
-# Component to scan for New issues and open unassigned issues
-jira-component: RHCOS
+# Jira project key/component pairs to be monitored for New issues and for
+# open issues with no assignee or an optional default assignee.  If no
+# default assignee is specified, issues are assumed to default to
+# unassigned.
+jira-components:
+  - project-key: OCPBUGS
+    component: RHCOS
+  - project-key: RHELPLAN
+    component: rust-coreos-installer
+    default-assignee: jira-bugzilla-migration
 # Jira polling interval in seconds
 jira-poll-interval: 300
