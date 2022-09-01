@@ -27,6 +27,7 @@ I understand these commands:
 `refresh` (in issue thread) - refresh the issue description
 `track {{issue-URL|issue-key}}` - start tracking the specified issue
 `report` - summarize unresolved issues to the channel
+`components` - list monitored Jira components
 `ping` - check whether the bot is running properly
 `refresh-all` - refresh all unresolved issue descriptions
 `help` - print this message
@@ -619,6 +620,16 @@ def process_event(config, socket_client, req):
                     client.reactions_remove(channel=payload.event.channel,
                             timestamp=payload.event.ts,
                             name='hourglass_flowing_sand')
+                complete_command()
+            elif message == 'components':
+                client.chat_postMessage(
+                    channel=payload.event.channel,
+                    text='Monitored components:\n' + '\n'.join(
+                        f'• {escape(project)}/{escape(component)}'
+                        for (project, component) in sorted(config.components)
+                    ),
+                    thread_ts=payload.event.ts
+                )
                 complete_command()
             elif message == 'ping':
                 # Check Jira connectivity
