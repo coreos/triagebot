@@ -492,10 +492,24 @@ def report_errors(f):
     import requests, socket, urllib.error
     @wraps(f)
     def wrapper(config, *args, **kwargs):
+        def do_report():
+            try:
+                message = f'Caught exception:\n```\n{traceback.format_exc()}```'
+                client = WebClient(token=config.slack_token)
+                channel = client.conversations_open(users=[config.error_notification])['channel']['id']
+                client.chat_postMessage(channel=channel, text=message)
+            except Exception:
+                traceback.print_exc()
         try:
             return f(config, *args, **kwargs)
         except HandledError:
             pass
+        except JIRAError as e:
+            if e.status_code == 401:
+                # Searches sometimes throw 401 errors.  Don't send message.
+                print(e)
+            else:
+                do_report()
         except requests.JSONDecodeError as e:
             # Exception type leaked from the jira API.  Assume transient
             # network problem; don't send message.
@@ -505,13 +519,7 @@ def report_errors(f):
             # network problem; don't send message.
             print(e)
         except Exception:
-            try:
-                message = f'Caught exception:\n```\n{traceback.format_exc()}```'
-                client = WebClient(token=config.slack_token)
-                channel = client.conversations_open(users=[config.error_notification])['channel']['id']
-                client.chat_postMessage(channel=channel, text=message)
-            except Exception:
-                traceback.print_exc()
+            do_report()
     return wrapper
 
 
