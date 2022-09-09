@@ -10,6 +10,7 @@ from functools import cached_property, reduce, wraps
 from heapq import heappop, heappush
 from itertools import count
 from jira import JIRA, JIRAError
+from jira.resources import Issue as JIRAIssue
 import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -47,6 +48,15 @@ def escape(message):
 
 def format_date(date):
     return f'<!date^{int(date.timestamp())}^{{date_long}} {{time}}|{date.strftime("%Y-%m-%d %H:%MZ")}>'
+
+
+def connect_jira(config):
+    return JIRA(
+        config.jira, token_auth=config.jira_token,
+        default_batch_sizes={
+            JIRAIssue: 50,
+        }
+    )
 
 
 class Database:
@@ -529,7 +539,7 @@ def process_event(config, socket_client, req):
     client = socket_client.web_client
     payload = DottedDict(req.payload)
     db = Database(config)
-    japi = JIRA(config.jira, token_auth=config.jira_token)
+    japi = connect_jira(config)
 
     def make_issue(**kwargs):
         return Issue(config, client, japi, db, **kwargs)
@@ -876,7 +886,7 @@ def main():
     client = WebClient(token=config.slack_token)
     # store our user IDs
     config.slack_id = client.auth_test()['user_id']
-    japi = JIRA(config.jira, token_auth=config.jira_token)
+    japi = connect_jira(config)
     try:
         config.jira_id = japi.myself()['name']
     except JIRAError:
