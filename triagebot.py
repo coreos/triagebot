@@ -515,8 +515,8 @@ def report_errors(f):
         except HandledError:
             pass
         except JIRAError as e:
-            if e.status_code == 401:
-                # Searches sometimes throw 401 errors.  Don't send message.
+            if e.status_code in (401, 503):
+                # Transient error.  Don't send message.
                 print(e)
             else:
                 do_report()
