@@ -499,6 +499,8 @@ def report_errors(f):
                 client = WebClient(token=config.slack_token)
                 channel = client.conversations_open(users=[config.error_notification])['channel']['id']
                 client.chat_postMessage(channel=channel, text=message)
+                # but always also print to the logs
+                print(message)
             except Exception:
                 traceback.print_exc()
     return wrapper
