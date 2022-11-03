@@ -1,3 +1,4 @@
+# rebuild: 20221103
 FROM registry.fedoraproject.org/fedora:36
 RUN dnf install -y python3-pip sqlite && dnf clean all
 COPY requirements.txt /
