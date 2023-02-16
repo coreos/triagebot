@@ -821,8 +821,17 @@ class Scheduler:
         # First, add new message
         expiration = int(time.time() + 60 * self._config.watchdog_minutes)
         message = f":robot_face: If you're seeing this, I haven't completed a Jira check in {self._config.watchdog_minutes} minutes.  I may be misconfigured, disconnected, or dead, or Jira may be down."
-        new_id = self._client.chat_scheduleMessage(channel=self._config.channel,
-                post_at=expiration, text=message)['scheduled_message_id']
+        try:
+            new_id = self._client.chat_scheduleMessage(
+                    channel=self._config.channel,
+                    post_at=expiration, text=message)['scheduled_message_id']
+        except SlackApiError as e:
+            if e.response['error'] == 'fatal_error':
+                # Happens sometimes?
+                print(e)
+                return
+            else:
+                raise
         # Then delete the old one
         name = 'watchdog'
         try:
