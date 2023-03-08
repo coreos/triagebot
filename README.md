@@ -1,3 +1,7 @@
+# :warning: This branch is no longer maintained :warning:
+
+---
+
 # Triagebot
 
 This is a simple Slack bot to help with triaging Bugzilla issues.  It reports new bugs to a designated Slack channel and tracks whether the bugs have been triaged.
