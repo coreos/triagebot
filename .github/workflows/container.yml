@@ -5,10 +5,10 @@ name: Container
 
 on:
   push:
-    branches: [main, bugzilla]
+    branches: [main]
     tags: ["v*"]
   pull_request:
-    branches: [main, bugzilla]
+    branches: [main]
 
 permissions:
   contents: read
