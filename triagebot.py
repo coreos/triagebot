@@ -475,7 +475,14 @@ def post_report(config, client, japi, db):
     '''Post a summary of unresolved issues to the channel.  Return the channel
     and timestamp.'''
     parts = []
-    for issue in Issue.list_unresolved(config, client, japi, db):
+    last_project = None
+    for issue in sorted(Issue.list_unresolved(config, client, japi, db),
+            key=lambda i: i.project.key):
+        if last_project != issue.project.key:
+            if last_project is not None:
+                parts.append('')
+            parts.extend([f'*Unresolved issues in {escape(issue.project.name)}:*', ''])
+            last_project = issue.project.key
         age_days = int((time.time() - float(issue.ts)) / 86400)
         link = client.chat_getPermalink(channel=issue.channel,
                 message_ts=issue.ts)["permalink"]
@@ -483,8 +490,8 @@ def post_report(config, client, japi, db):
         part = f'{icon} <{issue.url}|[{issue.key}]> <{link}|{escape(issue.summary)}> ({age_days} days)'
         parts.append(part)
     if not parts:
-        parts.append('_No issues!_')
-    message = '\n'.join(['*Unresolved issue summary:*'] + parts)
+        parts.append('*No unresolved issues!*')
+    message = '\n'.join(parts)
     ts = client.chat_postMessage(channel=config.channel,
             text=message, unfurl_links=False, unfurl_media=False)['ts']
     return config.channel, ts
