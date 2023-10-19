@@ -366,7 +366,6 @@ class Issue:
         self.ts = self._client.chat_postMessage(channel=self.channel,
                 text=message, blocks=blocks, unfurl_links=False,
                 unfurl_media=False)['ts']
-        self._client.pins_add(channel=self.channel, timestamp=self.ts)
         self._db.add_issue(self.id, self.channel, self.ts)
 
     def update_message(self):
@@ -402,11 +401,6 @@ class Issue:
                 timedelta(seconds=time.second, microseconds=time.microsecond))
         self.autoclose_comment_count = self.get_comment_count()
         self.update_message()
-        try:
-            self._client.pins_add(channel=self.channel, timestamp=self.ts)
-        except SlackApiError as e:
-            if e.response['error'] != 'already_pinned':
-                raise
         self._db.set_autoclose(self.id, self.autoclose_time,
                 self.autoclose_comment_count)
 
@@ -443,11 +437,6 @@ class Issue:
         self.resolved = True
         self.autoclose_time, self.autoclose_comment_count = (None, None)
         self.update_message()
-        try:
-            self._client.pins_remove(channel=self.channel, timestamp=self.ts)
-        except SlackApiError as e:
-            if e.response['error'] != 'no_pin':
-                raise
         self._db.set_resolved(self.id)
 
     def unresolve(self):
@@ -457,11 +446,6 @@ class Issue:
         self.resolved = False
         self.autoclose_time, self.autoclose_comment_count = (None, None)
         self.update_message()
-        try:
-            self._client.pins_add(channel=self.channel, timestamp=self.ts)
-        except SlackApiError as e:
-            if e.response['error'] != 'already_pinned':
-                raise
         self._db.set_resolved(self.id, False)
 
     def log(self, message):
